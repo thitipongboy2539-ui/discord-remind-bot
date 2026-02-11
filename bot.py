@@ -79,6 +79,34 @@ def progress_bar(percent):
     return "🟩" * filled + "⬜" * empty
 
 # ==============================
+# FORMAT REMAINING TIME
+# ==============================
+def format_remaining(seconds):
+    seconds = int(seconds)
+
+    days = seconds // 86400
+    seconds %= 86400
+
+    hours = seconds // 3600
+    seconds %= 3600
+
+    minutes = seconds // 60
+    seconds %= 60
+
+    parts = []
+
+    if days > 0:
+        parts.append(f"{days} วัน")
+    if hours > 0:
+        parts.append(f"{hours} ชั่วโมง")
+    if minutes > 0:
+        parts.append(f"{minutes} นาที")
+    if seconds > 0:
+        parts.append(f"{seconds} วินาที")
+
+    return " ".join(parts) if parts else "หมดเวลาแล้ว"
+
+# ==============================
 # FORMAT REMAINING
 # ==============================
 def format_remaining(seconds):
@@ -95,19 +123,40 @@ def format_remaining(seconds):
 def build_embed(member, role, duration_text, expire_time, remaining, total):
     percent = remaining / total
     bar = progress_bar(percent)
+    remaining_text = format_remaining(remaining)
 
     embed = discord.Embed(
         title="📅 Check member time!",
-        description="📌 สมาชิก\nRole ได้รับยศเรียบร้อยครัช",
+        description="Welcome to Zeno Community Mod\nRole ได้รับยศเรียบร้อยครัช",
         color=get_color(remaining, total)
     )
 
     embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
     embed.add_field(name="🏷 Role", value=role.mention, inline=False)
-    embed.add_field(name="📝 จำนวนวันสมาชิก", value=f"ระยะเวลา: {duration_text}", inline=False)
-    embed.add_field(name="⏳ วันหมดอายุ", value=format_thai_datetime(expire_time), inline=False)
-    embed.add_field(name="⏱ เวลาคงเหลือ", value=format_remaining(remaining), inline=False)
-    embed.add_field(name="📊 Progress", value=bar, inline=False)
+
+    embed.add_field(
+        name="📝 จำนวนเวลาสมาชิก",
+        value=f"ระยะเวลาคงเหลือ: {remaining_text}",
+        inline=False
+    )
+
+    embed.add_field(
+        name="⏳ วันหมดอายุ",
+        value=format_thai_datetime(expire_time),
+        inline=False
+    )
+
+    embed.add_field(
+        name="⏱ เวลาคงเหลือ (นาที)",
+        value=f"{int(remaining/60)} นาที",
+        inline=False
+    )
+
+    embed.add_field(
+        name="📊 Progress",
+        value=f"{bar} ({int(percent*100)}%)",
+        inline=False
+    )
 
     embed.set_image(url=LOGO_URL)
     embed.set_footer(text="🔔 ADMINZENO • Welcome To community")
@@ -127,7 +176,7 @@ async def role_timer(message, member, role, expire_time, total_seconds, admin_us
                 await member.remove_roles(role)
 
                 expired_embed = discord.Embed(
-                    title="⛔ Role หมดเวลาแล้ว",
+                    title="⛔ สมาชิกหมดเวลา",
                     description=f"{member.mention} ถูกลบ {role.mention} แล้ว",
                     color=0xFF0000
                 )
