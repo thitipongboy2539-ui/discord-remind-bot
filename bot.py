@@ -1,24 +1,21 @@
-import os
 import discord
 from discord import app_commands
 from discord.ext import commands
 import asyncio
 import datetime
 import re
+import os
 
 # ==============================
 # CONFIG
 # ==============================
-TOKEN = os.getenv("DISCORD_TOKEN")  # Railway Variable ต้องชื่อ DISCORD_TOKEN
+TOKEN = os.getenv("DISCORD_TOKEN")
 ADMIN_ID = 1392851942480412822
 LOGO_URL = "https://cdn.phototourl.com/uploads/2026-02-11-5a3eeb2d-d2bf-4821-9742-bdcf3c4d9540.gif"
 
-if not TOKEN:
-    print("❌ ไม่พบ DISCORD_TOKEN ใน Environment Variables")
-    exit()
-
 intents = discord.Intents.default()
 intents.members = True
+intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -48,7 +45,6 @@ def format_thai_datetime(dt):
         "มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
         "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"
     ]
-
     thai_days = [
         "จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์","อาทิตย์"
     ]
@@ -57,73 +53,46 @@ def format_thai_datetime(dt):
     return f"วัน{thai_days[dt.weekday()]}ที่ {dt.day} {thai_months[dt.month-1]} {year} {dt.strftime('%H:%M')}"
 
 # ==============================
+# DIGITAL TIMER STYLE
+# ==============================
+def format_digital(seconds):
+    seconds = int(seconds)
+
+    days = seconds // 86400
+    seconds %= 86400
+    hours = seconds // 3600
+    seconds %= 3600
+    minutes = seconds // 60
+    seconds %= 60
+
+    return f"{days:02}:{hours:02}:{minutes:02}:{seconds:02}"
+
+# ==============================
 # COLOR SYSTEM
 # ==============================
 def get_color(remaining, total):
-    percent = remaining / total
-    if percent <= 0.1:
-        return 0xFF4D4D
-    elif percent <= 0.5:
-        return 0xFFD93D
+    if remaining <= total * 0.1:
+        return 0xFF4D4D  # แดง
+    elif remaining <= total * 0.5:
+        return 0xFFD93D  # เหลือง
     else:
-        return 0x3EF2C5
+        return 0x3EF2C5  # มิ้น
 
 # ==============================
 # PROGRESS BAR
 # ==============================
 def progress_bar(percent):
-    percent = max(0, min(1, percent))
-    total_blocks = 10
+    total_blocks = 12
     filled = int(total_blocks * percent)
     empty = total_blocks - filled
     return "🟩" * filled + "⬜" * empty
 
 # ==============================
-# FORMAT REMAINING TIME
-# ==============================
-def format_remaining(seconds):
-    seconds = int(seconds)
-
-    days = seconds // 86400
-    seconds %= 86400
-
-    hours = seconds // 3600
-    seconds %= 3600
-
-    minutes = seconds // 60
-    seconds %= 60
-
-    parts = []
-
-    if days > 0:
-        parts.append(f"{days} วัน")
-    if hours > 0:
-        parts.append(f"{hours} ชั่วโมง")
-    if minutes > 0:
-        parts.append(f"{minutes} นาที")
-    if seconds > 0:
-        parts.append(f"{seconds} วินาที")
-
-    return " ".join(parts) if parts else "หมดเวลาแล้ว"
-
-# ==============================
-# FORMAT REMAINING
-# ==============================
-def format_remaining(seconds):
-    minutes = int(seconds // 60)
-    hours = minutes // 60
-
-    if hours > 0:
-        return f"{hours} ชั่วโมง"
-    return f"{minutes} นาที"
-
-# ==============================
 # BUILD EMBED
 # ==============================
-def build_embed(member, role, duration_text, expire_time, remaining, total):
+def build_embed(member, role, expire_time, remaining, total, note):
     percent = remaining / total
     bar = progress_bar(percent)
-    remaining_text = format_remaining(remaining)
 
     embed = discord.Embed(
         title="📅 Check member time!",
@@ -133,30 +102,16 @@ def build_embed(member, role, duration_text, expire_time, remaining, total):
 
     embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
     embed.add_field(name="🏷 Role", value=role.mention, inline=False)
+    embed.add_field(name="📝 หมายเหตุ", value=note, inline=False)
+    embed.add_field(name="⏳ วันหมดอายุ", value=format_thai_datetime(expire_time), inline=False)
 
     embed.add_field(
-        name="📝 จำนวนเวลาสมาชิก",
-        value=f"ระยะเวลาคงเหลือ: {remaining_text}",
+        name="🕹 เวลานับถอยหลัง (Digital)",
+        value=f"`{format_digital(remaining)}`",
         inline=False
     )
 
-    embed.add_field(
-        name="⏳ วันหมดอายุ",
-        value=format_thai_datetime(expire_time),
-        inline=False
-    )
-
-    embed.add_field(
-        name="⏱ เวลาคงเหลือ (นาที)",
-        value=f"{int(remaining/60)} นาที",
-        inline=False
-    )
-
-    embed.add_field(
-        name="📊 Progress",
-        value=f"{bar} ({int(percent*100)}%)",
-        inline=False
-    )
+    embed.add_field(name="📊 Progress", value=bar, inline=False)
 
     embed.set_image(url=LOGO_URL)
     embed.set_footer(text="🔔 ADMINZENO • Welcome To community")
@@ -166,7 +121,7 @@ def build_embed(member, role, duration_text, expire_time, remaining, total):
 # ==============================
 # TIMER LOOP
 # ==============================
-async def role_timer(message, member, role, expire_time, total_seconds, admin_user):
+async def role_timer(message, member, role, expire_time, total_seconds, admin_user, note):
     while True:
         now = datetime.datetime.now()
         remaining = (expire_time - now).total_seconds()
@@ -176,7 +131,7 @@ async def role_timer(message, member, role, expire_time, total_seconds, admin_us
                 await member.remove_roles(role)
 
                 expired_embed = discord.Embed(
-                    title="⛔ สมาชิกหมดเวลา",
+                    title="⛔ Role หมดเวลาแล้ว",
                     description=f"{member.mention} ถูกลบ {role.mention} แล้ว",
                     color=0xFF0000
                 )
@@ -187,18 +142,14 @@ async def role_timer(message, member, role, expire_time, total_seconds, admin_us
                 await member.send(f"⛔ Role {role.name} ของคุณหมดเวลาแล้ว")
                 await admin_user.send(f"⛔ {member.name} หมดเวลา Role {role.name}")
 
-            except Exception as e:
-                print("Error:", e)
-
+            except:
+                pass
             break
 
-        try:
-            embed = build_embed(member, role, role.name, expire_time, remaining, total_seconds)
-            await message.edit(embed=embed)
-        except:
-            pass
+        embed = build_embed(member, role, expire_time, remaining, total_seconds, note)
+        await message.edit(embed=embed)
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(5)  # อัปเดตทุก 5 วิ
 
 # ==============================
 # SLASH COMMAND
@@ -229,7 +180,7 @@ async def setrole(interaction: discord.Interaction,
 
     await member.add_roles(role)
 
-    embed = build_embed(member, role, duration, expire_time, seconds, seconds)
+    embed = build_embed(member, role, expire_time, seconds, seconds, note)
 
     await interaction.response.send_message(embed=embed)
     message = await interaction.original_response()
@@ -243,7 +194,7 @@ async def setrole(interaction: discord.Interaction,
         pass
 
     bot.loop.create_task(
-        role_timer(message, member, role, expire_time, seconds, admin_user)
+        role_timer(message, member, role, expire_time, seconds, admin_user, note)
     )
 
 # ==============================
