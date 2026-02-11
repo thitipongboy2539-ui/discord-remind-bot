@@ -1,14 +1,17 @@
 import json
 import os
+import random
 from flask import Flask, render_template_string, request, redirect, session
 
 app = Flask(__name__)
-app.secret_key = "supersecretkey123"  # เปลี่ยนเป็นอะไรก็ได้
+app.secret_key = "Zenomodshop20"
 
 DATA_FILE = "data.json"
 
 USERNAME = "Zenodesign"
-PASSWORD = "Boyying202539"   # เปลี่ยนรหัสเองได้
+PASSWORD = "Boyying2539"
+
+otp_storage = {}  # เก็บ OTP ชั่วคราว
 
 def load_data():
     if not os.path.exists(DATA_FILE):
@@ -23,8 +26,10 @@ def login():
         password = request.form.get("password")
 
         if username == USERNAME and password == PASSWORD:
-            session["logged_in"] = True
-            return redirect("/")
+            otp = str(random.randint(100000, 999999))
+            otp_storage["otp"] = otp
+            print(f"🔐 OTP CODE: {otp}")  # ดู OTP ใน Railway Logs
+            return redirect("/verify")
         else:
             return "❌ Wrong Username or Password"
 
@@ -34,6 +39,26 @@ def login():
         Username: <input type="text" name="username"><br><br>
         Password: <input type="password" name="password"><br><br>
         <button type="submit">Login</button>
+    </form>
+    """
+
+@app.route("/verify", methods=["GET", "POST"])
+def verify():
+    if request.method == "POST":
+        user_otp = request.form.get("otp")
+
+        if user_otp == otp_storage.get("otp"):
+            session["logged_in"] = True
+            otp_storage.clear()
+            return redirect("/")
+        else:
+            return "❌ Invalid OTP"
+
+    return """
+    <h2>🔑 Enter OTP</h2>
+    <form method="post">
+        OTP: <input type="text" name="otp"><br><br>
+        <button type="submit">Verify</button>
     </form>
     """
 
@@ -55,7 +80,7 @@ def dashboard():
     gold_count = sum(1 for u in users.values() if u["role"] == "Gold")
 
     html = """
-    <h1>👑 BOT DASHBOARD</h1>
+    <h1>👑 BOT DASHBOARD (2FA ENABLED)</h1>
     <a href="/logout">Logout</a>
 
     <h2>📊 Statistics</h2>
