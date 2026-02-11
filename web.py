@@ -10,7 +10,8 @@ DATA_FILE = "premium_data.json"
 
 ADMIN_USER = os.environ.get("ADMIN_USER")
 ADMIN_PASS = os.environ.get("ADMIN_PASS")
-
+print("ADMIN_USER =", ADMIN_USER)
+print("ADMIN_PASS =", ADMIN_PASS)
 
 def load_data():
     if not os.path.exists(DATA_FILE):
