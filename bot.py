@@ -20,7 +20,7 @@ client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 # ========================
-# FILE HELPERS
+# FILE STORAGE
 # ========================
 def load_reminders():
     if not os.path.exists(DATA_FILE):
@@ -49,17 +49,28 @@ async def schedule_reminder(reminder):
     if delay > 0:
         await asyncio.sleep(delay)
 
-    try:
-        user = await client.fetch_user(reminder["user_id"])
-        await user.send(
-            f"⏰ **แจ้งเตือน: {reminder['name']}**\n"
-            f"📅 {remind_time.astimezone(THAI_TZ).strftime('%Y-%m-%d %H:%M')}\n"
-            f"📝 {reminder['message']}"
-        )
-    except Exception as e:
-        print("Send failed:", e)
+    message_text = (
+        f"⏰ **แจ้งเตือน: {reminder['name']}**\n"
+        f"📅 {remind_time.astimezone(THAI_TZ).strftime('%Y-%m-%d %H:%M')}\n"
+        f"📝 {reminder['message']}"
+    )
 
-    # ลบหลังส่ง
+    # ส่ง DM ให้เจ้าของ
+    try:
+        owner = await client.fetch_user(reminder["user_id"])
+        await owner.send(message_text)
+    except Exception as e:
+        print("Owner DM failed:", e)
+
+    # ส่ง DM ให้ user ที่ถูกเลือก (ถ้ามี)
+    if reminder.get("notify_user_id"):
+        try:
+            notify_user = await client.fetch_user(reminder["notify_user_id"])
+            await notify_user.send(message_text)
+        except Exception as e:
+            print("Notify user DM failed:", e)
+
+    # ลบ reminder หลังส่ง
     reminders = load_reminders()
     reminders = [r for r in reminders if r["id"] != reminder["id"]]
     save_reminders(reminders)
@@ -84,14 +95,16 @@ async def on_ready():
     date="YYYY-MM-DD",
     time="HH:MM (24h)",
     name="ชื่อกิจกรรม",
-    message="รายละเอียดเพิ่มเติม"
+    message="รายละเอียด",
+    notify_user="เลือกคนที่ต้องการให้แจ้งเตือนเพิ่ม (ไม่บังคับ)"
 )
 async def remind(
     interaction: discord.Interaction,
     date: str,
     time: str,
     name: str,
-    message: str
+    message: str,
+    notify_user: discord.User = None
 ):
     try:
         remind_time = datetime.strptime(
@@ -100,7 +113,8 @@ async def remind(
 
     except ValueError:
         await interaction.response.send_message(
-            "❌ รูปแบบวันที่หรือเวลาไม่ถูกต้อง", ephemeral=True
+            "❌ รูปแบบวันที่หรือเวลาไม่ถูกต้อง",
+            ephemeral=True
         )
         return
 
@@ -109,7 +123,8 @@ async def remind(
         "user_id": interaction.user.id,
         "time": remind_time.isoformat(),
         "name": name,
-        "message": message
+        "message": message,
+        "notify_user_id": notify_user.id if notify_user else None
     }
 
     reminders = load_reminders()
@@ -118,24 +133,11 @@ async def remind(
 
     client.loop.create_task(schedule_reminder(reminder))
 
-    # ===== COUNTDOWN =====
-    now = datetime.now(timezone.utc)
-    seconds_left = int((remind_time - now).total_seconds())
-
-    if seconds_left > 0:
-        days = seconds_left // 86400
-        hours = (seconds_left % 86400) // 3600
-        minutes = (seconds_left % 3600) // 60
-        countdown_text = f"{days} วัน {hours} ชั่วโมง {minutes} นาที"
-    else:
-        countdown_text = "กำลังจะถึงเวลาแล้ว!"
-
     await interaction.response.send_message(
-        f"✅ แจ้งเดือนวันเวลาหมดอายุ!\n"
-        f"📌 ชื่อ: {name}\n"
+        f"✅ แจ้งเตือนวันหมดอายุ!\n"
+        f"📌 {name}\n"
         f"📅 {date} ⏰ {time}\n"
-        f"📝 {message}\n"
-        f"⏳ เหลือเวลาอีก {countdown_text}",
+        f"👤 แจ้งเตือนเพิ่ม: {notify_user.mention if notify_user else 'ไม่มี'}",
         ephemeral=True
     )
 
