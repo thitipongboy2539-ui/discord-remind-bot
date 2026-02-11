@@ -1,59 +1,41 @@
+from flask import Flask, render_template_string
+import json
 import os
-from flask import Flask, render_template_string, request, redirect, session
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "fallbacksecret")
 
-ADMIN_USER = os.environ.get("ADMIN_USER")
-ADMIN_PASS = os.environ.get("ADMIN_PASS")
+DATA_FILE = "premium_data.json"
 
-# ================= LOGIN PAGE =================
-login_page = """
-<h2>🔐 ZENO Dashboard Login</h2>
-<form method="POST">
-    <input type="text" name="username" placeholder="Username" required><br><br>
-    <input type="password" name="password" placeholder="Password" required><br><br>
-    <button type="submit">Login</button>
-</form>
-<p style="color:red;">{{ error }}</p>
-"""
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        return {}
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
 
-# ================= DASHBOARD =================
-dashboard_page = """
-<h2>👑 ZENO Dashboard</h2>
-<p>Login สำเร็จแล้ว</p>
-<a href="/logout">Logout</a>
-"""
-
-@app.route("/", methods=["GET", "POST"])
-def login():
-    error = ""
-
-    if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
-
-        print("Input:", username, password)
-        print("Env:", ADMIN_USER, ADMIN_PASS)
-
-        if username == ADMIN_USER and password == ADMIN_PASS:
-            session["admin"] = True
-            return redirect("/dashboard")
-        else:
-            error = "❌ Login Failed"
-
-    return render_template_string(login_page, error=error)
-
-@app.route("/dashboard")
+@app.route("/")
 def dashboard():
-    if not session.get("admin"):
-        return redirect("/")
-    return render_template_string(dashboard_page)
 
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/")
+    data = load_data()
+
+    html = """
+    <h1>👑 Premium Dashboard</h1>
+    <table border="1" cellpadding="10">
+        <tr>
+            <th>User ID</th>
+            <th>Package</th>
+            <th>Expiry</th>
+        </tr>
+        {% for user_id, info in data.items() %}
+        <tr>
+            <td>{{ user_id }}</td>
+            <td>{{ info.package }}</td>
+            <td>{{ info.expiry }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    """
+
+    return render_template_string(html, data=data)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
