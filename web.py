@@ -1,119 +1,121 @@
+from flask import Flask, request, redirect, render_template_string
 import json
 import os
-import random
-from flask import Flask, render_template_string, request, redirect, session
+import datetime
 
 app = Flask(__name__)
-app.secret_key = "Zenomodshop20"
 
-DATA_FILE = "data.json"
+DATA_FILE = "premium_data.json"
 
-USERNAME = "Zenodesign"
-PASSWORD = "Boyying2539"
-
-otp_storage = {}  # เก็บ OTP ชั่วคราว
 
 def load_data():
     if not os.path.exists(DATA_FILE):
-        return {"users": {}, "pending": {}}
+        return {}
     with open(DATA_FILE, "r") as f:
         return json.load(f)
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
 
-        if username == USERNAME and password == PASSWORD:
-            otp = str(random.randint(100000, 999999))
-            otp_storage["otp"] = otp
-            print(f"🔐 OTP CODE: {otp}")  # ดู OTP ใน Railway Logs
-            return redirect("/verify")
-        else:
-            return "❌ Wrong Username or Password"
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
-    return """
-    <h2>🔐 Admin Login</h2>
-    <form method="post">
-        Username: <input type="text" name="username"><br><br>
-        Password: <input type="password" name="password"><br><br>
-        <button type="submit">Login</button>
-    </form>
-    """
-
-@app.route("/verify", methods=["GET", "POST"])
-def verify():
-    if request.method == "POST":
-        user_otp = request.form.get("otp")
-
-        if user_otp == otp_storage.get("otp"):
-            session["logged_in"] = True
-            otp_storage.clear()
-            return redirect("/")
-        else:
-            return "❌ Invalid OTP"
-
-    return """
-    <h2>🔑 Enter OTP</h2>
-    <form method="post">
-        OTP: <input type="text" name="otp"><br><br>
-        <button type="submit">Verify</button>
-    </form>
-    """
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect("/login")
 
 @app.route("/")
-def dashboard():
-    if not session.get("logged_in"):
-        return redirect("/login")
-
+def home():
     data = load_data()
-    users = data.get("users", {})
-    pending = data.get("pending", {})
-
-    vip_count = sum(1 for u in users.values() if u["role"] == "VIP")
-    gold_count = sum(1 for u in users.values() if u["role"] == "Gold")
 
     html = """
-    <h1>👑 BOT DASHBOARD (2FA ENABLED)</h1>
-    <a href="/logout">Logout</a>
-
-    <h2>📊 Statistics</h2>
-    <ul>
-        <li>VIP: {{vip}}</li>
-        <li>Gold: {{gold}}</li>
-        <li>Pending: {{pending}}</li>
-    </ul>
-
-    <h2>📋 Members</h2>
-    <table border="1" cellpadding="5">
+    <h1>👑 ZENO Premium Dashboard</h1>
+    <table border="1" cellpadding="10">
         <tr>
             <th>User ID</th>
-            <th>Role</th>
+            <th>Package</th>
             <th>Expiry</th>
+            <th>Action</th>
         </tr>
-        {% for uid, info in users.items() %}
-        <tr>
-            <td>{{uid}}</td>
-            <td>{{info.role}}</td>
-            <td>{{info.expiry}}</td>
-        </tr>
-        {% endfor %}
-    </table>
     """
 
-    return render_template_string(
-        html,
-        vip=vip_count,
-        gold=gold_count,
-        pending=len(pending),
-        users=users
-    )
+    for user_id, info in data.items():
+        html += f"""
+        <tr>
+            <td>{user_id}</td>
+            <td>{info['package']}</td>
+            <td>{info['expiry']}</td>
+            <td>
+                <form action="/extend" method="post" style="display:inline;">
+                    <input type="hidden" name="user_id" value="{user_id}">
+                    <button type="submit">➕ +30 วัน</button>
+                </form>
+
+                <form action="/remove" method="post" style="display:inline;">
+                    <input type="hidden" name="user_id" value="{user_id}">
+                    <button type="submit">❌ Remove</button>
+                </form>
+            </td>
+        </tr>
+        """
+
+    html += """
+    </table>
+
+    <h2>➕ เพิ่มสมาชิกใหม่</h2>
+    <form action="/add" method="post">
+        User ID: <input type="text" name="user_id"><br><br>
+        Package:
+        <select name="package">
+            <option value="VIP">VIP</option>
+            <option value="Gold">Gold</option>
+        </select><br><br>
+        <button type="submit">เพิ่ม</button>
+    </form>
+    """
+
+    return render_template_string(html)
+
+
+@app.route("/add", methods=["POST"])
+def add():
+    user_id = request.form["user_id"]
+    package = request.form["package"]
+
+    data = load_data()
+
+    expiry = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=30)
+
+    data[user_id] = {
+        "package": package,
+        "expiry": expiry.isoformat()
+    }
+
+    save_data(data)
+    return redirect("/")
+
+
+@app.route("/extend", methods=["POST"])
+def extend():
+    user_id = request.form["user_id"]
+    data = load_data()
+
+    if user_id in data:
+        old_expiry = datetime.datetime.fromisoformat(data[user_id]["expiry"])
+        new_expiry = old_expiry + datetime.timedelta(days=30)
+        data[user_id]["expiry"] = new_expiry.isoformat()
+        save_data(data)
+
+    return redirect("/")
+
+
+@app.route("/remove", methods=["POST"])
+def remove():
+    user_id = request.form["user_id"]
+    data = load_data()
+
+    if user_id in data:
+        del data[user_id]
+        save_data(data)
+
+    return redirect("/")
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
