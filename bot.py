@@ -52,7 +52,7 @@ async def schedule_reminder(reminder):
     try:
         user = await client.fetch_user(reminder["user_id"])
         await user.send(
-            f"⏰ **แจ้งเตือนถึงเวลาแล้ว!**\n"
+            f"⏰ **แจ้งเตือน: {reminder['name']}**\n"
             f"📅 {remind_time.astimezone(THAI_TZ).strftime('%Y-%m-%d %H:%M')}\n"
             f"📝 {reminder['message']}"
         )
@@ -83,9 +83,16 @@ async def on_ready():
 @app_commands.describe(
     date="YYYY-MM-DD",
     time="HH:MM (24h)",
-    message="ข้อความเตือน"
+    name="ชื่อกิจกรรม",
+    message="รายละเอียดเพิ่มเติม"
 )
-async def remind(interaction: discord.Interaction, date: str, time: str, message: str):
+async def remind(
+    interaction: discord.Interaction,
+    date: str,
+    time: str,
+    name: str,
+    message: str
+):
     try:
         remind_time = datetime.strptime(
             f"{date} {time}", "%Y-%m-%d %H:%M"
@@ -101,6 +108,7 @@ async def remind(interaction: discord.Interaction, date: str, time: str, message
         "id": datetime.now().timestamp(),
         "user_id": interaction.user.id,
         "time": remind_time.isoformat(),
+        "name": name,
         "message": message
     }
 
@@ -118,13 +126,13 @@ async def remind(interaction: discord.Interaction, date: str, time: str, message
         days = seconds_left // 86400
         hours = (seconds_left % 86400) // 3600
         minutes = (seconds_left % 3600) // 60
-
         countdown_text = f"{days} วัน {hours} ชั่วโมง {minutes} นาที"
     else:
         countdown_text = "กำลังจะถึงเวลาแล้ว!"
 
     await interaction.response.send_message(
-        f"✅ ตั้งเตือนแล้ว!\n"
+        f"✅ แจ้งเดือนวันเวลาหมดอายุ!\n"
+        f"📌 ชื่อ: {name}\n"
         f"📅 {date} ⏰ {time}\n"
         f"📝 {message}\n"
         f"⏳ เหลือเวลาอีก {countdown_text}",
