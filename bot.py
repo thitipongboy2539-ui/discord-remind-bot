@@ -109,13 +109,13 @@ def build_embed(member, role, expire_time, remaining, total, note, tick):
 
     embed = discord.Embed(
         title="📅 Check member time!",
-        description="Welcome to Zeno Community Mod\nRole ได้รับยศเรียบร้อยครัช",
+        description="Welcome to Zeno Community Mod\nTime Member",
         color=get_color(percent)
     )
 
-    embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
+    embed.add_field(name="👤 ZenoMember", value=member.mention, inline=False)
     embed.add_field(name="🏷 Role", value=role.mention, inline=False)
-    embed.add_field(name="📝 หมายเหตุ", value=note, inline=False)
+    embed.add_field(name="📝 Status", value=note, inline=False)
     embed.add_field(name="⏳ วันหมดอายุ", value=thai_date(expire_time), inline=False)
 
     embed.add_field(
