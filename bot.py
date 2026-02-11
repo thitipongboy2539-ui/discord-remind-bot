@@ -1,212 +1,190 @@
 import discord
-from discord import app_commands
-import asyncio
-from datetime import datetime, timezone, timedelta
-import json
+from discord.ext import commands
 import os
+import asyncio
 import re
+from datetime import datetime, timedelta, timezone
 
 # ========================
 # CONFIG
 # ========================
-TOKEN = os.getenv("DISCORD_TOKEN")
-DATA_FILE = "reminders.json"
 
-# 🎨 ADMINZENO THEME
-ADMINZENO_COLOR = 0x3EF2C5  # สีมิ้น
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+ADMIN_NOTIFY_ID = 1392851942480412822
+
 LOGO_URL = "https://cdn.phototourl.com/uploads/2026-02-11-5a3eeb2d-d2bf-4821-9742-bdcf3c4d9540.gif"
 
-if not TOKEN:
-    raise RuntimeError("❌ ไม่พบ DISCORD_TOKEN")
+MINT_COLOR = 0x98FFCC  # สีมิ้น
 
 # ========================
-# DISCORD SETUP
+# INTENTS
 # ========================
+
 intents = discord.Intents.default()
 intents.members = True
+intents.message_content = True
 
-client = discord.Client(intents=intents)
-tree = app_commands.CommandTree(client)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ========================
-# STORAGE
-# ========================
-def load_reminders():
-    if not os.path.exists(DATA_FILE):
-        return []
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_reminders(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
 # ========================
-# PARSE TIME (1h 30m 7d)
+# แปลงเวลา 1h / 30m / 7d
 # ========================
-def parse_duration(duration_str):
-    pattern = re.compile(r"(\d+)([dhm])")
-    matches = pattern.findall(duration_str.lower())
 
-    if not matches:
+def parse_time(time_str):
+    match = re.match(r"(\d+)([smhd])", time_str.lower())
+    if not match:
         return None
 
-    delta = timedelta()
+    amount = int(match.group(1))
+    unit = match.group(2)
 
-    for amount, unit in matches:
-        amount = int(amount)
-        if unit == "d":
-            delta += timedelta(days=amount)
-        elif unit == "h":
-            delta += timedelta(hours=amount)
-        elif unit == "m":
-            delta += timedelta(minutes=amount)
+    if unit == "s":
+        return timedelta(seconds=amount)
+    if unit == "m":
+        return timedelta(minutes=amount)
+    if unit == "h":
+        return timedelta(hours=amount)
+    if unit == "d":
+        return timedelta(days=amount)
 
-    return delta
+    return None
 
-# ========================
-# REMINDER TASK
-# ========================
-async def schedule_reminder(reminder):
-    remind_time = datetime.fromisoformat(reminder["time"])
-    now = datetime.now(timezone.utc)
-
-    delay = (remind_time - now).total_seconds()
-    if delay > 0:
-        await asyncio.sleep(delay)
-
-    guild = client.get_guild(reminder["guild_id"])
-    if not guild:
-        return
-
-    member = guild.get_member(reminder["target_user_id"])
-    role = guild.get_role(reminder["role_id"])
-
-    if member and role:
-        try:
-            await member.remove_roles(role)
-        except Exception as e:
-            print("Remove role error:", e)
-
-        # 🔴 Embed ตอนหมดเวลา
-        embed = discord.Embed(
-            title="📅 Check member time!",
-            description="📌 หมายเหตุ\nRole หมดเวลาแล้ว",
-            color=0xFF4D4D
-        )
-
-        embed.set_thumbnail(url=LOGO_URL)
-
-        embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
-        embed.add_field(name="🏷 Role", value=role.mention, inline=False)
-        embed.add_field(name="📝 รายละเอียด", value="ระบบได้ลบ Role อัตโนมัติ", inline=False)
-
-        embed.set_footer(text="🔔 ADMINZENO • Premium Role System")
-
-        try:
-            await member.send(embed=embed)
-        except:
-            pass
-
-    reminders = load_reminders()
-    reminders = [r for r in reminders if r["id"] != reminder["id"]]
-    save_reminders(reminders)
 
 # ========================
-# READY
+# EVENT READY
 # ========================
-@client.event
+
+@bot.event
 async def on_ready():
-    await tree.sync()
-    print(f"✅ Logged in as {client.user}")
+    print(f"✅ Logged in as {bot.user}")
 
-    reminders = load_reminders()
-    for r in reminders:
-        client.loop.create_task(schedule_reminder(r))
 
 # ========================
-# SLASH COMMAND
+# คำสั่งให้ Role แบบตั้งเวลา
 # ========================
-@tree.command(name="temprole", description="ให้ Role ชั่วคราว (Admin เท่านั้น)")
-@app_commands.describe(
-    duration="เช่น 30m / 1h / 7d / 2h30m",
-    target_user="เลือกสมาชิก",
-    role="เลือก Role"
-)
-async def temprole(
-    interaction: discord.Interaction,
-    duration: str,
-    target_user: discord.Member,
-    role: discord.Role
-):
 
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message(
-            "❌ คำสั่งนี้สำหรับ Admin เท่านั้น",
-            ephemeral=True
-        )
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setrole(ctx, member: discord.Member, role: discord.Role, time_str: str, *, name: str):
+
+    duration = parse_time(time_str)
+
+    if not duration:
+        await ctx.send("❌ ใช้เวลาแบบ 30m / 1h / 7d เท่านั้น")
         return
 
-    delta = parse_duration(duration)
+    end_time = datetime.now(timezone.utc) + duration
 
-    if not delta:
-        await interaction.response.send_message(
-            "❌ รูปแบบเวลาไม่ถูกต้อง (ตัวอย่าง: 30m, 1h, 7d, 2h30m)",
-            ephemeral=True
-        )
-        return
+    # ให้ Role
+    await member.add_roles(role)
 
-    now = datetime.now(timezone.utc)
-    remind_time = now + delta
-    expire_timestamp = int(remind_time.timestamp())
+    # ========================
+    # EMBED แจ้งในเซิร์ฟเวอร์
+    # ========================
 
-    try:
-        await target_user.add_roles(role)
-    except:
-        await interaction.response.send_message(
-            "❌ เพิ่ม Role ไม่สำเร็จ (เช็ค Permission)",
-            ephemeral=True
-        )
-        return
-
-    reminder = {
-        "id": datetime.now().timestamp(),
-        "guild_id": interaction.guild.id,
-        "target_user_id": target_user.id,
-        "role_id": role.id,
-        "time": remind_time.isoformat()
-    }
-
-    reminders = load_reminders()
-    reminders.append(reminder)
-    save_reminders(reminders)
-
-    client.loop.create_task(schedule_reminder(reminder))
-
-    # 🟢 Embed ตอนตั้งสำเร็จ
     embed = discord.Embed(
         title="📅 Check member time!",
-        description="📌 หมายเหตุ\nRole ถูกกำหนดแบบชั่วคราวเรียบร้อยแล้ว",
-        color=ADMINZENO_COLOR
+        description=f"📝 รายละเอียด\n\nให้ Role {role.mention} กับ {member.mention}",
+        color=MINT_COLOR
     )
 
     embed.set_thumbnail(url=LOGO_URL)
 
-    embed.add_field(name="👤 สมาชิก", value=target_user.mention, inline=False)
-    embed.add_field(name="🏷 Role", value=role.mention, inline=False)
-    embed.add_field(name="📝 รายละเอียด", value=f"ระยะเวลา: {duration}", inline=False)
+    embed.add_field(name="👤 สร้างโดย", value="🔔 ADMINZENO", inline=False)
+    embed.add_field(name="📌 หมายเหตุ", value=name, inline=False)
+    embed.add_field(name="⏳ เวลาหมดอายุ", value=end_time.strftime("%d %B %Y %H:%M:%S UTC"), inline=False)
+    embed.add_field(name="⌛ นับถอยหลัง", value=f"{time_str}", inline=False)
 
-    embed.add_field(
-        name="⏳ วันหมดอายุ",
-        value=f"<t:{expire_timestamp}:F>\n(เหลือเวลา <t:{expire_timestamp}:R>)",
-        inline=False
+    embed.set_footer(text="ADMINZENO SYSTEM")
+
+    await ctx.send(embed=embed)
+
+    # ========================
+    # DM ผู้ใช้
+    # ========================
+
+    try:
+        user_dm = discord.Embed(
+            title="🎉 คุณได้รับ Role แล้ว!",
+            description=f"คุณได้รับ {role.name}",
+            color=MINT_COLOR
+        )
+        user_dm.set_thumbnail(url=LOGO_URL)
+        user_dm.add_field(name="⏳ หมดอายุใน", value=time_str)
+        await member.send(embed=user_dm)
+    except:
+        pass
+
+    # ========================
+    # DM ADMIN ตอนให้ Role ครั้งแรก
+    # ========================
+
+    try:
+        admin = await bot.fetch_user(ADMIN_NOTIFY_ID)
+        await admin.send(f"✅ ให้ Role {role.name} กับ {member.name} แล้ว ({time_str})")
+    except:
+        pass
+
+    # ========================
+    # รอหมดเวลา
+    # ========================
+
+    await asyncio.sleep(duration.total_seconds())
+
+    # ลบ Role
+    await member.remove_roles(role)
+
+    # ========================
+    # แจ้งหมดเวลาในเซิร์ฟเวอร์
+    # ========================
+
+    expire_embed = discord.Embed(
+        title="⏰ Role หมดเวลาแล้ว",
+        description=f"{member.mention} ถูกลบ Role {role.name}",
+        color=MINT_COLOR
     )
 
-    embed.set_footer(text="🔔 ADMINZENO • Premium Role System")
+    expire_embed.set_thumbnail(url=LOGO_URL)
 
-    await interaction.response.send_message(embed=embed)
+    await ctx.send(embed=expire_embed)
+
+    # ========================
+    # DM ผู้ใช้ตอนหมดเวลา
+    # ========================
+
+    try:
+        await member.send(f"⏰ Role {role.name} ของคุณหมดเวลาแล้ว")
+    except:
+        pass
+
+    # ========================
+    # DM ADMIN ตอนหมดเวลา
+    # ========================
+
+    try:
+        admin = await bot.fetch_user(ADMIN_NOTIFY_ID)
+        await admin.send(f"⏰ Role {role.name} ของ {member.name} หมดเวลาแล้ว")
+    except:
+        pass
+
 
 # ========================
-# RUN
+# ERROR ADMIN ONLY
 # ========================
-client.run(TOKEN)
+
+@setrole.error
+async def setrole_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ คำสั่งนี้ใช้ได้เฉพาะ Admin เท่านั้น")
+
+
+# ========================
+# RUN BOT
+# ========================
+
+if not TOKEN:
+    print("❌ DISCORD_TOKEN not found")
+else:
+    bot.run(TOKEN)
