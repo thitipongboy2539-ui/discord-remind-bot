@@ -143,18 +143,18 @@ async def remind(
 
     # ===== EMBED =====
     embed = discord.Embed(
-        title="📅 แจ้งเตือนใหม่ถูกสร้าง!",
+        title="📅 Check member time!",
         color=discord.Color.blue()
     )
 
-    embed.add_field(name="📌 ชื่อกิจกรรม", value=name, inline=False)
+    embed.add_field(name="📌 หมายเหตุ", value=name, inline=False)
     embed.add_field(name="📝 รายละเอียด", value=message, inline=False)
-    embed.add_field(name="⏰ วันเวลา", value=f"{date} {time}", inline=False)
-    embed.add_field(name="⏳ นับถอยหลัง", value=countdown_text, inline=False)
+    embed.add_field(name="⏰ วันเวลาอายุสมาชิก", value=f"{date} {time}", inline=False)
+    embed.add_field(name="⏳ เวลาคงเหลือ", value=countdown_text, inline=False)
     embed.add_field(name="👤 สร้างโดย", value=interaction.user.mention, inline=False)
 
     if notify_user:
-        embed.add_field(name="🔔 แจ้งเตือนเพิ่ม", value=notify_user.mention, inline=False)
+        embed.add_field(name="🔔 ADMINZENO", value=notify_user.mention, inline=False)
 
     embed.set_footer(text="Reminder System")
     embed.timestamp = datetime.now()
