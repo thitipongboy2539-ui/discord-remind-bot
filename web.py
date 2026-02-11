@@ -7,8 +7,8 @@ app.secret_key = "supersecretkey123"  # เปลี่ยนเป็นอะ�
 
 DATA_FILE = "data.json"
 
-USERNAME = "admin"
-PASSWORD = "1234"   # เปลี่ยนรหัสเองได้
+USERNAME = "Zenodesign"
+PASSWORD = "Boyying202539"   # เปลี่ยนรหัสเองได้
 
 def load_data():
     if not os.path.exists(DATA_FILE):
