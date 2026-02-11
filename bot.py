@@ -7,172 +7,192 @@ import re
 from datetime import datetime, timedelta, timezone
 
 # ================= CONFIG =================
-
 TOKEN = os.getenv("DISCORD_TOKEN")
+
 ADMIN_NOTIFY_ID = 1392851942480412822
+
 LOGO_URL = "https://cdn.phototourl.com/uploads/2026-02-11-5a3eeb2d-d2bf-4821-9742-bdcf3c4d9540.gif"
 MINT_COLOR = 0x98FFCC
-
-# ================= INTENTS =================
 
 intents = discord.Intents.default()
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ================= PARSE TIME =================
-
-def parse_time(time_str):
-    match = re.match(r"(\d+)([smhd])", time_str.lower())
+# ================= TIME PARSER =================
+def parse_duration(time_str):
+    match = re.match(r"(\d+)([smhd])$", time_str.lower())
     if not match:
         return None
 
-    amount = int(match.group(1))
+    value = int(match.group(1))
     unit = match.group(2)
 
     if unit == "s":
-        return timedelta(seconds=amount)
+        return timedelta(seconds=value)
     if unit == "m":
-        return timedelta(minutes=amount)
+        return timedelta(minutes=value)
     if unit == "h":
-        return timedelta(hours=amount)
+        return timedelta(hours=value)
     if unit == "d":
-        return timedelta(days=amount)
+        return timedelta(days=value)
 
-    return None
+# ================= THAI DATE =================
+def thai_datetime(dt):
+    thai_months = [
+        "", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน",
+        "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม",
+        "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+    ]
+    thai_days = [
+        "วันจันทร์", "วันอังคาร", "วันพุธ",
+        "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์", "วันอาทิตย์"
+    ]
+
+    day_name = thai_days[dt.weekday()]
+    month_name = thai_months[dt.month]
+    year_be = dt.year + 543
+
+    return f"{day_name}ที่ {dt.day} {month_name} {year_be} {dt.strftime('%H:%M')}"
 
 # ================= READY =================
-
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     print(f"✅ Logged in as {bot.user}")
 
 # ================= SLASH COMMAND =================
-
-@bot.tree.command(name="setrole", description="ตั้งเวลาให้ Role แบบ ADMINZENO")
+@bot.tree.command(name="setrole", description="🔔 ADMINZENO ตั้งเวลา Role")
 @app_commands.describe(
     member="เลือกสมาชิก",
     role="เลือก Role",
-    duration="เวลา เช่น 30m / 1h / 7d",
-    note="หมายเหตุ"
+    duration="เช่น 30m / 1h / 7d"
 )
-async def setrole(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    role: discord.Role,
-    duration: str,
-    note: str
-):
+async def setrole(interaction: discord.Interaction,
+                  member: discord.Member,
+                  role: discord.Role,
+                  duration: str):
 
     # จำกัดเฉพาะ Admin
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message(
-            "❌ คำสั่งนี้ใช้ได้เฉพาะ Admin เท่านั้น",
+            "❌ ใช้ได้เฉพาะ Admin เท่านั้น",
             ephemeral=True
         )
         return
 
-    delta = parse_time(duration)
+    delta = parse_duration(duration)
     if not delta:
         await interaction.response.send_message(
-            "❌ ใช้เวลาแบบ 30m / 1h / 7d เท่านั้น",
+            "❌ รูปแบบเวลาใช้ 1h / 30m / 7d",
             ephemeral=True
         )
         return
+
+    await interaction.response.send_message(
+        "✅ ระบบกำลังดำเนินการ (แจ้งเตือนผ่าน DM เท่านั้น)",
+        ephemeral=True
+    )
 
     end_time = datetime.now(timezone.utc) + delta
     unix_time = int(end_time.timestamp())
+    thai_time = thai_datetime(end_time.astimezone())
 
+    # เพิ่ม Role
     await member.add_roles(role)
 
     # ================= EMBED =================
-
     embed = discord.Embed(
         title="📅 Check member time!",
-        description=f"📝 รายละเอียด\n\nให้ Role {role.mention} กับ {member.mention}",
         color=MINT_COLOR
     )
 
-    embed.set_thumbnail(url=LOGO_URL)
-
-    embed.add_field(name="👤 สร้างโดย", value="🔔 ADMINZENO", inline=False)
-    embed.add_field(name="📌 หมายเหตุ", value=note, inline=False)
     embed.add_field(
-        name="⏳ หมดอายุ",
-        value=f"<t:{unix_time}:F>",
-        inline=False
-    )
-    embed.add_field(
-        name="⌛ นับถอยหลัง",
-        value=f"<t:{unix_time}:R>",
+        name="📌 สมาชิก",
+        value="Role ได้รับยศเรียบร้อยครัช",
         inline=False
     )
 
-    embed.set_footer(text="ADMINZENO SYSTEM")
+    embed.add_field(
+        name="👤 สมาชิก",
+        value=member.mention,
+        inline=False
+    )
 
-    await interaction.response.send_message(embed=embed)
+    embed.add_field(
+        name="🏷 Role",
+        value=role.mention,
+        inline=False
+    )
 
-    # ================= DM USER =================
+    embed.add_field(
+        name="📝 จำนวนวันสมาชิก",
+        value=f"ระยะเวลา: {duration}",
+        inline=False
+    )
 
+    embed.add_field(
+        name="⏳ วันหมดอายุ",
+        value=f"{thai_time}\n(<t:{unix_time}:R>)",
+        inline=False
+    )
+
+    embed.set_image(url=LOGO_URL)
+    embed.set_footer(text="🔔 ADMINZENO • Welcome To community")
+
+    # ================= DM ตอนให้ Role =================
     try:
-        user_dm = discord.Embed(
-            title="🎉 คุณได้รับ Role แล้ว!",
-            description=f"คุณได้รับ {role.name}",
-            color=MINT_COLOR
-        )
-        user_dm.set_thumbnail(url=LOGO_URL)
-        user_dm.add_field(name="หมดอายุ", value=f"<t:{unix_time}:F>")
-        user_dm.add_field(name="นับถอยหลัง", value=f"<t:{unix_time}:R>")
-        await member.send(embed=user_dm)
+        await member.send(embed=embed)
     except:
         pass
 
-    # ================= DM ADMIN (ตอนให้ครั้งแรก) =================
-
     try:
-        admin = await bot.fetch_user(ADMIN_NOTIFY_ID)
-        await admin.send(
-            f"✅ ให้ Role {role.name} กับ {member.name}\nหมดอายุ: <t:{unix_time}:F>"
-        )
+        admin_user = await bot.fetch_user(ADMIN_NOTIFY_ID)
+        await admin_user.send(embed=embed)
     except:
         pass
 
-    # ================= WAIT =================
-
+    # ================= รอหมดเวลา =================
     await asyncio.sleep(delta.total_seconds())
 
+    # ลบ Role
     await member.remove_roles(role)
 
-    # ================= EXPIRE EMBED =================
-
     expire_embed = discord.Embed(
-        title="⏰ Role หมดเวลาแล้ว",
-        description=f"{member.mention} ถูกลบ Role {role.name}",
+        title="⏰ Role หมดอายุแล้ว",
         color=MINT_COLOR
     )
 
-    expire_embed.set_thumbnail(url=LOGO_URL)
+    expire_embed.add_field(
+        name="👤 สมาชิก",
+        value=member.mention,
+        inline=False
+    )
 
-    await interaction.channel.send(embed=expire_embed)
+    expire_embed.add_field(
+        name="🏷 Role ที่ถูกลบ",
+        value=role.mention,
+        inline=False
+    )
 
-    # DM USER
+    expire_embed.set_footer(text="🔔 ADMINZENO SYSTEM")
+    expire_embed.set_image(url=LOGO_URL)
+
+    # ================= DM ตอนหมดเวลา =================
     try:
-        await member.send(f"⏰ Role {role.name} ของคุณหมดเวลาแล้ว")
+        await member.send(embed=expire_embed)
     except:
         pass
 
-    # DM ADMIN
     try:
-        admin = await bot.fetch_user(ADMIN_NOTIFY_ID)
-        await admin.send(f"⏰ Role {role.name} ของ {member.name} หมดเวลาแล้ว")
+        admin_user = await bot.fetch_user(ADMIN_NOTIFY_ID)
+        await admin_user.send(embed=expire_embed)
     except:
         pass
 
 
 # ================= RUN =================
-
 if not TOKEN:
-    print("❌ DISCORD_TOKEN not found")
+    print("❌ ไม่พบ DISCORD_TOKEN")
 else:
     bot.run(TOKEN)
