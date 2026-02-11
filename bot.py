@@ -1,190 +1,225 @@
 import discord
-from discord.ext import commands
-import os
+from discord import app_commands
 import asyncio
+from datetime import datetime, timezone, timedelta
+import os
 import re
-from datetime import datetime, timedelta, timezone
-
-# ========================
-# CONFIG
-# ========================
+import json
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-ADMIN_NOTIFY_ID = 1392851942480412822
-
+ADMIN_ID = 1392851942480412822
+LOG_CHANNEL_ID = 123456789012345678
 LOGO_URL = "https://cdn.phototourl.com/uploads/2026-02-11-5a3eeb2d-d2bf-4821-9742-bdcf3c4d9540.gif"
+MINT = 0x3EF2C5
 
-MINT_COLOR = 0x98FFCC  # สีมิ้น
+DATA_FILE = "temprole.json"
 
-# ========================
-# INTENTS
-# ========================
+if not TOKEN:
+    raise RuntimeError("❌ DISCORD_TOKEN not found")
 
 intents = discord.Intents.default()
 intents.members = True
-intents.message_content = True
+client = discord.Client(intents=intents)
+tree = app_commands.CommandTree(client)
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+
+# ================= STORAGE =================
+
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        return []
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
+
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=2)
 
 
-# ========================
-# แปลงเวลา 1h / 30m / 7d
-# ========================
+# ================= TIME PARSER =================
 
-def parse_time(time_str):
-    match = re.match(r"(\d+)([smhd])", time_str.lower())
-    if not match:
+def parse_duration(text):
+    pattern = re.compile(r"(\d+)([dhm])")
+    matches = pattern.findall(text.lower())
+    if not matches:
         return None
 
-    amount = int(match.group(1))
-    unit = match.group(2)
-
-    if unit == "s":
-        return timedelta(seconds=amount)
-    if unit == "m":
-        return timedelta(minutes=amount)
-    if unit == "h":
-        return timedelta(hours=amount)
-    if unit == "d":
-        return timedelta(days=amount)
-
-    return None
+    delta = timedelta()
+    for amount, unit in matches:
+        amount = int(amount)
+        if unit == "d":
+            delta += timedelta(days=amount)
+        elif unit == "h":
+            delta += timedelta(hours=amount)
+        elif unit == "m":
+            delta += timedelta(minutes=amount)
+    return delta
 
 
-# ========================
-# EVENT READY
-# ========================
+# ================= THAI DATE =================
 
-@bot.event
-async def on_ready():
-    print(f"✅ Logged in as {bot.user}")
+def thai_datetime(dt):
+    thai_months = [
+        "มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
+        "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"
+    ]
+    thai_days = [
+        "จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์","อาทิตย์"
+    ]
+
+    day_name = thai_days[dt.weekday()]
+    day = dt.day
+    month = thai_months[dt.month - 1]
+    year = dt.year + 543
+    time_str = dt.strftime("%H:%M")
+
+    return f"วัน{day_name}ที่ {day} {month} {year} เวลา {time_str}"
 
 
-# ========================
-# คำสั่งให้ Role แบบตั้งเวลา
-# ========================
+# ================= SCHEDULER =================
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setrole(ctx, member: discord.Member, role: discord.Role, time_str: str, *, name: str):
+async def schedule_expire(data):
+    expire_time = datetime.fromisoformat(data["expire"])
+    delay = (expire_time - datetime.now(timezone.utc)).total_seconds()
 
-    duration = parse_time(time_str)
+    if delay > 0:
+        await asyncio.sleep(delay)
 
-    if not duration:
-        await ctx.send("❌ ใช้เวลาแบบ 30m / 1h / 7d เท่านั้น")
+    guild = client.get_guild(data["guild"])
+    if not guild:
         return
 
-    end_time = datetime.now(timezone.utc) + duration
+    member = guild.get_member(data["member"])
+    role = guild.get_role(data["role"])
+    channel = guild.get_channel(LOG_CHANNEL_ID)
 
-    # ให้ Role
+    if member and role:
+        await member.remove_roles(role)
+
+        embed = discord.Embed(
+            title="📅 Check member time!",
+            color=MINT
+        )
+        embed.set_thumbnail(url=LOGO_URL)
+
+        embed.add_field(name="📌 หมายเหตุ", value="Role หมดเวลาแล้ว", inline=False)
+        embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
+        embed.add_field(name="🏷 Role", value=role.mention, inline=False)
+        embed.set_footer(text="🔔 ADMINZENO • Welcome To community")
+
+        if channel:
+            await channel.send(embed=embed)
+
+        try:
+            await member.send(embed=embed)
+        except:
+            pass
+
+        try:
+            admin = await client.fetch_user(ADMIN_ID)
+            await admin.send(embed=embed)
+        except:
+            pass
+
+    saved = load_data()
+    saved = [x for x in saved if x["id"] != data["id"]]
+    save_data(saved)
+
+
+# ================= READY =================
+
+@client.event
+async def on_ready():
+    await tree.sync()
+    print(f"✅ Logged in as {client.user}")
+
+    for item in load_data():
+        client.loop.create_task(schedule_expire(item))
+
+
+# ================= SLASH COMMAND =================
+
+@tree.command(name="setrole", description="กำหนด Role แบบจำกัดเวลา (Admin)")
+@app_commands.describe(
+    member="เลือกสมาชิก",
+    role="เลือก Role",
+    duration="เช่น 30m / 1h / 7d",
+    note="หมายเหตุ"
+)
+async def setrole(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    role: discord.Role,
+    duration: str,
+    note: str
+):
+
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Admin เท่านั้น", ephemeral=True)
+        return
+
+    delta = parse_duration(duration)
+    if not delta:
+        await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง", ephemeral=True)
+        return
+
+    now = datetime.now(timezone.utc)
+    expire = now + delta
+
     await member.add_roles(role)
 
-    # ========================
-    # EMBED แจ้งในเซิร์ฟเวอร์
-    # ========================
+    expire_ts = int(expire.timestamp())
+    thai_date_text = thai_datetime(expire.astimezone())
 
     embed = discord.Embed(
         title="📅 Check member time!",
-        description=f"📝 รายละเอียด\n\nให้ Role {role.mention} กับ {member.mention}",
-        color=MINT_COLOR
+        color=MINT
     )
 
     embed.set_thumbnail(url=LOGO_URL)
 
-    embed.add_field(name="👤 สร้างโดย", value="🔔 ADMINZENO", inline=False)
-    embed.add_field(name="📌 หมายเหตุ", value=name, inline=False)
-    embed.add_field(name="⏳ เวลาหมดอายุ", value=end_time.strftime("%d %B %Y %H:%M:%S UTC"), inline=False)
-    embed.add_field(name="⌛ นับถอยหลัง", value=f"{time_str}", inline=False)
-
-    embed.set_footer(text="ADMINZENO SYSTEM")
-
-    await ctx.send(embed=embed)
-
-    # ========================
-    # DM ผู้ใช้
-    # ========================
-
-    try:
-        user_dm = discord.Embed(
-            title="🎉 คุณได้รับ Role แล้ว!",
-            description=f"คุณได้รับ {role.name}",
-            color=MINT_COLOR
-        )
-        user_dm.set_thumbnail(url=LOGO_URL)
-        user_dm.add_field(name="⏳ หมดอายุใน", value=time_str)
-        await member.send(embed=user_dm)
-    except:
-        pass
-
-    # ========================
-    # DM ADMIN ตอนให้ Role ครั้งแรก
-    # ========================
-
-    try:
-        admin = await bot.fetch_user(ADMIN_NOTIFY_ID)
-        await admin.send(f"✅ ให้ Role {role.name} กับ {member.name} แล้ว ({time_str})")
-    except:
-        pass
-
-    # ========================
-    # รอหมดเวลา
-    # ========================
-
-    await asyncio.sleep(duration.total_seconds())
-
-    # ลบ Role
-    await member.remove_roles(role)
-
-    # ========================
-    # แจ้งหมดเวลาในเซิร์ฟเวอร์
-    # ========================
-
-    expire_embed = discord.Embed(
-        title="⏰ Role หมดเวลาแล้ว",
-        description=f"{member.mention} ถูกลบ Role {role.name}",
-        color=MINT_COLOR
+    embed.add_field(name="📌 หมายเหตุ", value=note, inline=False)
+    embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
+    embed.add_field(name="🏷 Role", value=role.mention, inline=False)
+    embed.add_field(name="📝 ระยะเวลา", value=duration, inline=False)
+    embed.add_field(
+        name="⏳ วันหมดอายุ",
+        value=f"{thai_date_text}\nระยะเวลาคงเหลือ: <t:{expire_ts}:R>",
+        inline=False
     )
 
-    expire_embed.set_thumbnail(url=LOGO_URL)
+    embed.set_footer(text="🔔 ADMINZENO • Welcome To community")
 
-    await ctx.send(embed=expire_embed)
-
-    # ========================
-    # DM ผู้ใช้ตอนหมดเวลา
-    # ========================
+    channel = interaction.guild.get_channel(LOG_CHANNEL_ID)
+    if channel:
+        await channel.send(embed=embed)
 
     try:
-        await member.send(f"⏰ Role {role.name} ของคุณหมดเวลาแล้ว")
+        await member.send(embed=embed)
     except:
         pass
 
-    # ========================
-    # DM ADMIN ตอนหมดเวลา
-    # ========================
-
     try:
-        admin = await bot.fetch_user(ADMIN_NOTIFY_ID)
-        await admin.send(f"⏰ Role {role.name} ของ {member.name} หมดเวลาแล้ว")
+        admin = await client.fetch_user(ADMIN_ID)
+        await admin.send(embed=embed)
     except:
         pass
 
+    save = load_data()
+    data = {
+        "id": datetime.now().timestamp(),
+        "guild": interaction.guild.id,
+        "member": member.id,
+        "role": role.id,
+        "expire": expire.isoformat()
+    }
+    save.append(data)
+    save_data(save)
 
-# ========================
-# ERROR ADMIN ONLY
-# ========================
+    client.loop.create_task(schedule_expire(data))
 
-@setrole.error
-async def setrole_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ คำสั่งนี้ใช้ได้เฉพาะ Admin เท่านั้น")
+    await interaction.response.send_message("✅ ตั้ง Role สำเร็จ", ephemeral=True)
 
 
-# ========================
-# RUN BOT
-# ========================
-
-if not TOKEN:
-    print("❌ DISCORD_TOKEN not found")
-else:
-    bot.run(TOKEN)
+client.run(TOKEN)
