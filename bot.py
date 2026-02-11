@@ -1,13 +1,21 @@
+import os
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 import asyncio
 import datetime
 import re
 
-TOKEN = os.getenv("DISCORD_TOKEN")
+# ==============================
+# CONFIG
+# ==============================
+TOKEN = os.getenv("DISCORD_TOKEN")  # Railway Variable ต้องชื่อ DISCORD_TOKEN
 ADMIN_ID = 1392851942480412822
 LOGO_URL = "https://cdn.phototourl.com/uploads/2026-02-11-5a3eeb2d-d2bf-4821-9742-bdcf3c4d9540.gif"
+
+if not TOKEN:
+    print("❌ ไม่พบ DISCORD_TOKEN ใน Environment Variables")
+    exit()
 
 intents = discord.Intents.default()
 intents.members = True
@@ -52,21 +60,34 @@ def format_thai_datetime(dt):
 # COLOR SYSTEM
 # ==============================
 def get_color(remaining, total):
-    if remaining <= total * 0.1:
-        return 0xFF4D4D  # แดง
-    elif remaining <= total * 0.5:
-        return 0xFFD93D  # เหลือง
+    percent = remaining / total
+    if percent <= 0.1:
+        return 0xFF4D4D
+    elif percent <= 0.5:
+        return 0xFFD93D
     else:
-        return 0x3EF2C5  # มิ้น
+        return 0x3EF2C5
 
 # ==============================
 # PROGRESS BAR
 # ==============================
 def progress_bar(percent):
+    percent = max(0, min(1, percent))
     total_blocks = 10
     filled = int(total_blocks * percent)
     empty = total_blocks - filled
     return "🟩" * filled + "⬜" * empty
+
+# ==============================
+# FORMAT REMAINING
+# ==============================
+def format_remaining(seconds):
+    minutes = int(seconds // 60)
+    hours = minutes // 60
+
+    if hours > 0:
+        return f"{hours} ชั่วโมง"
+    return f"{minutes} นาที"
 
 # ==============================
 # BUILD EMBED
@@ -85,7 +106,7 @@ def build_embed(member, role, duration_text, expire_time, remaining, total):
     embed.add_field(name="🏷 Role", value=role.mention, inline=False)
     embed.add_field(name="📝 จำนวนวันสมาชิก", value=f"ระยะเวลา: {duration_text}", inline=False)
     embed.add_field(name="⏳ วันหมดอายุ", value=format_thai_datetime(expire_time), inline=False)
-    embed.add_field(name="⏱ เวลาคงเหลือ", value=f"{int(remaining/60)} นาที", inline=False)
+    embed.add_field(name="⏱ เวลาคงเหลือ", value=format_remaining(remaining), inline=False)
     embed.add_field(name="📊 Progress", value=bar, inline=False)
 
     embed.set_image(url=LOGO_URL)
@@ -111,17 +132,22 @@ async def role_timer(message, member, role, expire_time, total_seconds, admin_us
                     color=0xFF0000
                 )
                 expired_embed.set_footer(text="🔔 ADMINZENO • หมดเวลาแล้ว")
+
                 await message.edit(embed=expired_embed)
 
                 await member.send(f"⛔ Role {role.name} ของคุณหมดเวลาแล้ว")
                 await admin_user.send(f"⛔ {member.name} หมดเวลา Role {role.name}")
 
-            except:
-                pass
+            except Exception as e:
+                print("Error:", e)
+
             break
 
-        embed = build_embed(member, role, role.name, expire_time, remaining, total_seconds)
-        await message.edit(embed=embed)
+        try:
+            embed = build_embed(member, role, role.name, expire_time, remaining, total_seconds)
+            await message.edit(embed=embed)
+        except:
+            pass
 
         await asyncio.sleep(60)
 
@@ -147,7 +173,7 @@ async def setrole(interaction: discord.Interaction,
 
     seconds = parse_time(duration)
     if not seconds:
-        await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง (เช่น 30m / 1h / 7d)", ephemeral=True)
+        await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง (30m / 1h / 7d)", ephemeral=True)
         return
 
     expire_time = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
@@ -161,7 +187,6 @@ async def setrole(interaction: discord.Interaction,
 
     admin_user = await bot.fetch_user(ADMIN_ID)
 
-    # DM ตอนให้ Role
     try:
         await member.send(f"🎉 คุณได้รับ Role {role.name} ระยะเวลา {duration}")
         await admin_user.send(f"✅ ให้ Role {role.name} กับ {member.name} สำเร็จ")
@@ -178,6 +203,6 @@ async def setrole(interaction: discord.Interaction,
 @bot.event
 async def on_ready():
     await bot.tree.sync()
-    print(f"Bot online: {bot.user}")
+    print(f"✅ Bot online: {bot.user}")
 
 bot.run(TOKEN)
