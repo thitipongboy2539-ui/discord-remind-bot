@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, redirect, request, session
+from flask import Flask, redirect, request, session
 import json
 import os
 import datetime
@@ -21,7 +21,7 @@ def load_data():
         return json.load(f)
 
 # -------------------------
-# Login
+# Login Page
 # -------------------------
 @app.route("/", methods=["GET", "POST"])
 def login():
@@ -36,12 +36,25 @@ def login():
             return "❌ Login Failed"
 
     return """
-    <h2>🔐 Admin Login</h2>
-    <form method="post">
-        <input name="username" placeholder="Username"><br><br>
-        <input name="password" type="password" placeholder="Password"><br><br>
-        <button type="submit">Login</button>
-    </form>
+    <html>
+    <head>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-900 flex items-center justify-center h-screen text-white">
+        <div class="bg-gray-800 p-8 rounded-2xl shadow-xl w-96">
+            <h2 class="text-2xl font-bold mb-6 text-center">🔐 Admin Login</h2>
+            <form method="post" class="space-y-4">
+                <input name="username" placeholder="Username"
+                    class="w-full p-3 rounded bg-gray-700 focus:outline-none">
+                <input name="password" type="password" placeholder="Password"
+                    class="w-full p-3 rounded bg-gray-700 focus:outline-none">
+                <button class="w-full bg-emerald-500 hover:bg-emerald-600 p-3 rounded font-bold">
+                    Login
+                </button>
+            </form>
+        </div>
+    </body>
+    </html>
     """
 
 # -------------------------
@@ -55,50 +68,102 @@ def dashboard():
     data = load_data()
     now = datetime.datetime.now(datetime.UTC)
 
-    rows = ""
     total = len(data)
+    vip_count = 0
+    gold_count = 0
+
+    rows = ""
 
     for user_id, info in data.items():
         expiry = datetime.datetime.fromisoformat(info["expiry"])
         remaining = expiry - now
 
-        if remaining.total_seconds() <= 0:
-            status = "🔴 Expired"
-            color = "#ff4d4d"
-        elif remaining <= datetime.timedelta(days=3):
-            status = "🟡 Expiring Soon"
-            color = "#ffd633"
+        if info["package"] == "vip":
+            vip_count += 1
         else:
-            status = "🟢 Active"
-            color = "#3ef2c5"
+            gold_count += 1
+
+        if remaining.total_seconds() <= 0:
+            status = "Expired"
+            color = "text-red-400"
+        elif remaining <= datetime.timedelta(days=3):
+            status = "Expiring Soon"
+            color = "text-yellow-400"
+        else:
+            status = "Active"
+            color = "text-emerald-400"
 
         rows += f"""
-        <tr>
-            <td>{user_id}</td>
-            <td>{info['package'].upper()}</td>
-            <td>{expiry.strftime('%d/%m/%Y %H:%M')}</td>
-            <td style='color:{color}; font-weight:bold'>{status}</td>
-            <td>
-                <a href="/remove/{user_id}" style="color:red">Remove</a>
+        <tr class="border-b border-gray-700 hover:bg-gray-800">
+            <td class="p-3">{user_id}</td>
+            <td class="p-3 uppercase">{info['package']}</td>
+            <td class="p-3">{expiry.strftime('%d/%m/%Y %H:%M')}</td>
+            <td class="p-3 font-bold {color}">{status}</td>
+            <td class="p-3">
+                <a href="/remove/{user_id}" 
+                   class="bg-red-500 hover:bg-red-600 px-3 py-1 rounded text-sm">
+                   Remove
+                </a>
             </td>
         </tr>
         """
 
     return f"""
-    <h2>👑 Premium Dashboard</h2>
-    <p>📦 Total Members: {total}</p>
-    <table border="1" cellpadding="10">
-        <tr>
-            <th>User ID</th>
-            <th>Package</th>
-            <th>Expiry</th>
-            <th>Status</th>
-            <th>Action</th>
-        </tr>
-        {rows}
-    </table>
-    <br>
-    <a href="/logout">Logout</a>
+    <html>
+    <head>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-900 text-white min-h-screen p-8">
+
+        <div class="max-w-6xl mx-auto">
+
+            <h1 class="text-3xl font-bold mb-8">👑 Premium Enterprise Dashboard</h1>
+
+            <!-- Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                <div class="bg-gray-800 p-6 rounded-2xl shadow">
+                    <h2 class="text-gray-400">Total Members</h2>
+                    <p class="text-3xl font-bold mt-2">{total}</p>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-2xl shadow">
+                    <h2 class="text-gray-400">VIP Members</h2>
+                    <p class="text-3xl font-bold text-emerald-400 mt-2">{vip_count}</p>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-2xl shadow">
+                    <h2 class="text-gray-400">Gold Members</h2>
+                    <p class="text-3xl font-bold text-yellow-400 mt-2">{gold_count}</p>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="bg-gray-800 rounded-2xl shadow overflow-hidden">
+                <table class="w-full text-left">
+                    <thead class="bg-gray-700 text-gray-300">
+                        <tr>
+                            <th class="p-3">User ID</th>
+                            <th class="p-3">Package</th>
+                            <th class="p-3">Expiry</th>
+                            <th class="p-3">Status</th>
+                            <th class="p-3">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-8">
+                <a href="/logout" 
+                   class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded">
+                   Logout
+                </a>
+            </div>
+
+        </div>
+
+    </body>
+    </html>
     """
 
 # -------------------------
