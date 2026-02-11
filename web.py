@@ -1,11 +1,15 @@
-from flask import Flask, request, redirect, render_template_string
+from flask import Flask, request, redirect, render_template_string, session
 import json
 import os
 import datetime
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "supersecretkey")
 
 DATA_FILE = "premium_data.json"
+
+ADMIN_USER = os.environ.get("ADMIN_USER")
+ADMIN_PASS = os.environ.get("ADMIN_PASS")
 
 
 def load_data():
@@ -20,12 +24,50 @@ def save_data(data):
         json.dump(data, f, indent=4)
 
 
+def is_logged_in():
+    return session.get("logged_in")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+
+        if username == ADMIN_USER and password == ADMIN_PASS:
+            session["logged_in"] = True
+            return redirect("/")
+        else:
+            return "❌ Login Failed"
+
+    return """
+    <h2>🔐 Admin Login</h2>
+    <form method="post">
+        Username:<br>
+        <input type="text" name="username"><br><br>
+        Password:<br>
+        <input type="password" name="password"><br><br>
+        <button type="submit">Login</button>
+    </form>
+    """
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
 @app.route("/")
 def home():
+    if not is_logged_in():
+        return redirect("/login")
+
     data = load_data()
 
     html = """
     <h1>👑 ZENO Premium Dashboard</h1>
+    <a href="/logout">🚪 Logout</a>
     <table border="1" cellpadding="10">
         <tr>
             <th>User ID</th>
@@ -75,6 +117,9 @@ def home():
 
 @app.route("/add", methods=["POST"])
 def add():
+    if not is_logged_in():
+        return redirect("/login")
+
     user_id = request.form["user_id"]
     package = request.form["package"]
 
@@ -93,6 +138,9 @@ def add():
 
 @app.route("/extend", methods=["POST"])
 def extend():
+    if not is_logged_in():
+        return redirect("/login")
+
     user_id = request.form["user_id"]
     data = load_data()
 
@@ -107,6 +155,9 @@ def extend():
 
 @app.route("/remove", methods=["POST"])
 def remove():
+    if not is_logged_in():
+        return redirect("/login")
+
     user_id = request.form["user_id"]
     data = load_data()
 
