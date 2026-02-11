@@ -55,22 +55,19 @@ async def schedule_reminder(reminder):
         f"📝 {reminder['message']}"
     )
 
-    # ส่ง DM ให้เจ้าของ
     try:
         owner = await client.fetch_user(reminder["user_id"])
         await owner.send(message_text)
-    except Exception as e:
-        print("Owner DM failed:", e)
+    except:
+        pass
 
-    # ส่ง DM ให้ user ที่ถูกเลือก (ถ้ามี)
     if reminder.get("notify_user_id"):
         try:
             notify_user = await client.fetch_user(reminder["notify_user_id"])
             await notify_user.send(message_text)
-        except Exception as e:
-            print("Notify user DM failed:", e)
+        except:
+            pass
 
-    # ลบ reminder หลังส่ง
     reminders = load_reminders()
     reminders = [r for r in reminders if r["id"] != reminder["id"]]
     save_reminders(reminders)
@@ -113,8 +110,7 @@ async def remind(
 
     except ValueError:
         await interaction.response.send_message(
-            "❌ รูปแบบวันที่หรือเวลาไม่ถูกต้อง",
-            ephemeral=True
+            "❌ รูปแบบวันที่หรือเวลาไม่ถูกต้อง"
         )
         return
 
@@ -133,13 +129,37 @@ async def remind(
 
     client.loop.create_task(schedule_reminder(reminder))
 
-    await interaction.response.send_message(
-        f"✅ แจ้งเตือนวันหมดอายุ!\n"
-        f"📌 {name}\n"
-        f"📅 {date} ⏰ {time}\n"
-        f"👤 แจ้งเตือนเพิ่ม: {notify_user.mention if notify_user else 'ไม่มี'}",
-        ephemeral=True
+    # ===== COUNTDOWN =====
+    now = datetime.now(timezone.utc)
+    seconds_left = int((remind_time - now).total_seconds())
+
+    if seconds_left > 0:
+        days = seconds_left // 86400
+        hours = (seconds_left % 86400) // 3600
+        minutes = (seconds_left % 3600) // 60
+        countdown_text = f"{days} วัน {hours} ชั่วโมง {minutes} นาที"
+    else:
+        countdown_text = "กำลังจะถึงเวลาแล้ว!"
+
+    # ===== EMBED =====
+    embed = discord.Embed(
+        title="📅 แจ้งเตือนใหม่ถูกสร้าง!",
+        color=discord.Color.blue()
     )
+
+    embed.add_field(name="📌 ชื่อกิจกรรม", value=name, inline=False)
+    embed.add_field(name="📝 รายละเอียด", value=message, inline=False)
+    embed.add_field(name="⏰ วันเวลา", value=f"{date} {time}", inline=False)
+    embed.add_field(name="⏳ นับถอยหลัง", value=countdown_text, inline=False)
+    embed.add_field(name="👤 สร้างโดย", value=interaction.user.mention, inline=False)
+
+    if notify_user:
+        embed.add_field(name="🔔 แจ้งเตือนเพิ่ม", value=notify_user.mention, inline=False)
+
+    embed.set_footer(text="Reminder System")
+    embed.timestamp = datetime.now()
+
+    await interaction.response.send_message(embed=embed)
 
 # ========================
 # RUN
