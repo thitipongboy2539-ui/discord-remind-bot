@@ -186,7 +186,7 @@ async def temprole(
     # 🟢 Embed ตอนตั้งสำเร็จ
     embed = discord.Embed(
         title="📅 Check member time!",
-        description="📌 หมายเหตุ\nRole ถูกกำหนดแบบชั่วคราวเรียบร้อยแล้ว",
+        description="📌 สมาชิก\nRole ได้รับยศเรียบร้อยครัช",
         color=ADMINZENO_COLOR
     )
 
@@ -194,7 +194,7 @@ async def temprole(
 
     embed.add_field(name="👤 สมาชิก", value=target_user.mention, inline=False)
     embed.add_field(name="🏷 Role", value=role.mention, inline=False)
-    embed.add_field(name="📝 รายละเอียด", value=f"ระยะเวลา: {duration}", inline=False)
+    embed.add_field(name="📝 จำนวนวันสมาชิก", value=f"ระยะเวลา: {duration}", inline=False)
 
     embed.add_field(
         name="⏳ วันหมดอายุ",
@@ -202,7 +202,7 @@ async def temprole(
         inline=False
     )
 
-    embed.set_footer(text="🔔 ADMINZENO • Premium Role System")
+    embed.set_footer(text="🔔 ADMINZENO • ยินดีต้อนรับ")
 
     await interaction.response.send_message(embed=embed)
 
