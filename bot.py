@@ -5,7 +5,7 @@ import asyncio
 import datetime
 import re
 
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = os.getenv("DISCORD_TOKEN")
 ADMIN_ID = 1392851942480412822
 LOGO_URL = "https://cdn.phototourl.com/uploads/2026-02-11-5a3eeb2d-d2bf-4821-9742-bdcf3c4d9540.gif"
 
