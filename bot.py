@@ -9,8 +9,12 @@ import re
 # ========================
 # CONFIG
 # ========================
-DATA_FILE = "reminders.json"
 TOKEN = os.getenv("DISCORD_TOKEN")
+DATA_FILE = "reminders.json"
+
+# 🎨 ADMINZENO THEME
+ADMINZENO_COLOR = 0x3EF2C5  # สีมิ้น
+LOGO_URL = "https://cdn.phototourl.com/uploads/2026-02-11-5a3eeb2d-d2bf-4821-9742-bdcf3c4d9540.gif"
 
 if not TOKEN:
     raise RuntimeError("❌ ไม่พบ DISCORD_TOKEN")
@@ -38,7 +42,7 @@ def save_reminders(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 # ========================
-# TIME PARSER (1h 30m 7d)
+# PARSE TIME (1h 30m 7d)
 # ========================
 def parse_duration(duration_str):
     pattern = re.compile(r"(\d+)([dhm])")
@@ -68,11 +72,13 @@ async def schedule_reminder(reminder):
     now = datetime.now(timezone.utc)
 
     delay = (remind_time - now).total_seconds()
-
     if delay > 0:
         await asyncio.sleep(delay)
 
     guild = client.get_guild(reminder["guild_id"])
+    if not guild:
+        return
+
     member = guild.get_member(reminder["target_user_id"])
     role = guild.get_role(reminder["role_id"])
 
@@ -82,16 +88,25 @@ async def schedule_reminder(reminder):
         except Exception as e:
             print("Remove role error:", e)
 
-    embed = discord.Embed(
-        title="⏰ หมดเวลาแล้ว",
-        description=f"Role {role.mention} ถูกลบเรียบร้อย",
-        color=discord.Color.red()
-    )
+        # 🔴 Embed ตอนหมดเวลา
+        embed = discord.Embed(
+            title="📅 Check member time!",
+            description="📌 หมายเหตุ\nRole หมดเวลาแล้ว",
+            color=0xFF4D4D
+        )
 
-    try:
-        await member.send(embed=embed)
-    except:
-        pass
+        embed.set_thumbnail(url=LOGO_URL)
+
+        embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
+        embed.add_field(name="🏷 Role", value=role.mention, inline=False)
+        embed.add_field(name="📝 รายละเอียด", value="ระบบได้ลบ Role อัตโนมัติ", inline=False)
+
+        embed.set_footer(text="🔔 ADMINZENO • Premium Role System")
+
+        try:
+            await member.send(embed=embed)
+        except:
+            pass
 
     reminders = load_reminders()
     reminders = [r for r in reminders if r["id"] != reminder["id"]]
@@ -125,7 +140,6 @@ async def temprole(
     role: discord.Role
 ):
 
-    # ✅ จำกัดเฉพาะ Admin
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message(
             "❌ คำสั่งนี้สำหรับ Admin เท่านั้น",
@@ -144,6 +158,7 @@ async def temprole(
 
     now = datetime.now(timezone.utc)
     remind_time = now + delta
+    expire_timestamp = int(remind_time.timestamp())
 
     try:
         await target_user.add_roles(role)
@@ -168,13 +183,26 @@ async def temprole(
 
     client.loop.create_task(schedule_reminder(reminder))
 
+    # 🟢 Embed ตอนตั้งสำเร็จ
     embed = discord.Embed(
-        title="🎉 ให้ Role ชั่วคราวสำเร็จ",
-        color=discord.Color.green()
+        title="📅 Check member time!",
+        description="📌 หมายเหตุ\nRole ถูกกำหนดแบบชั่วคราวเรียบร้อยแล้ว",
+        color=ADMINZENO_COLOR
     )
-    embed.add_field(name="👤 สมาชิก", value=target_user.mention)
-    embed.add_field(name="🏷 Role", value=role.mention)
-    embed.add_field(name="⏳ ระยะเวลา", value=duration)
+
+    embed.set_thumbnail(url=LOGO_URL)
+
+    embed.add_field(name="👤 สมาชิก", value=target_user.mention, inline=False)
+    embed.add_field(name="🏷 Role", value=role.mention, inline=False)
+    embed.add_field(name="📝 รายละเอียด", value=f"ระยะเวลา: {duration}", inline=False)
+
+    embed.add_field(
+        name="⏳ วันหมดอายุ",
+        value=f"<t:{expire_timestamp}:F>\n(เหลือเวลา <t:{expire_timestamp}:R>)",
+        inline=False
+    )
+
+    embed.set_footer(text="🔔 ADMINZENO • Premium Role System")
 
     await interaction.response.send_message(embed=embed)
 
