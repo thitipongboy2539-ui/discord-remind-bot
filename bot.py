@@ -1,35 +1,27 @@
 import discord
 from discord import app_commands
-import os
-import sys
-import json
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
+import json
+import os
 
-# ======================
+# ========================
 # CONFIG
-# ======================
-TOKEN = os.getenv("DISCORD_TOKEN")
+# ========================
 DATA_FILE = "reminders.json"
+TOKEN = os.getenv("DISCORD_TOKEN")
 THAI_TZ = timezone(timedelta(hours=7))
 
-# ======================
-# CHECK TOKEN (สำคัญมาก)
-# ======================
-if not TOKEN:
-    print("❌ DISCORD_TOKEN not found in Environment")
-    sys.exit(0)
-
-# ======================
+# ========================
 # DISCORD SETUP
-# ======================
+# ========================
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-# ======================
-# STORAGE
-# ======================
+# ========================
+# FILE HELPERS
+# ========================
 def load_reminders():
     if not os.path.exists(DATA_FILE):
         return []
@@ -40,38 +32,60 @@ def save_reminders(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ======================
-# REMINDER TASK
-# ======================
+# ========================
+# REMINDER SCHEDULER
+# ========================
 async def schedule_reminder(reminder):
-    now = datetime.now(timezone.utc)
     remind_time = datetime.fromisoformat(reminder["time"])
+
+    if remind_time.tzinfo is None:
+        remind_time = remind_time.replace(tzinfo=timezone.utc)
+    else:
+        remind_time = remind_time.astimezone(timezone.utc)
+
+    now = datetime.now(timezone.utc)
     delay = (remind_time - now).total_seconds()
 
     if delay > 0:
         await asyncio.sleep(delay)
 
-    user = await client.fetch_user(reminder["user_id"])
-    await user.send(f"⏰ แจ้งเตือน:\n{reminder['message']}")
+    try:
+        user = await client.fetch_user(reminder["user_id"])
+        await user.send(
+            f"⏰ **แจ้งเตือนถึงเวลาแล้ว!**\n"
+            f"📅 {remind_time.astimezone(THAI_TZ).strftime('%Y-%m-%d %H:%M')}\n"
+            f"📝 {reminder['message']}"
+        )
+    except Exception as e:
+        print("Send failed:", e)
 
-# ======================
+    # ลบหลังส่ง
+    reminders = load_reminders()
+    reminders = [r for r in reminders if r["id"] != reminder["id"]]
+    save_reminders(reminders)
+
+# ========================
+# ON READY
+# ========================
+@client.event
+async def on_ready():
+    await tree.sync()
+    print(f"✅ Logged in as {client.user}")
+
+    reminders = load_reminders()
+    for r in reminders:
+        client.loop.create_task(schedule_reminder(r))
+
+# ========================
 # SLASH COMMAND
-# ======================
-@tree.command(
-    name="remind",
-    description="ตั้งแจ้งเตือน (วัน/เวลา)"
-)
+# ========================
+@tree.command(name="remind", description="ตั้งแจ้งเตือน")
 @app_commands.describe(
-    date="รูปแบบ YYYY-MM-DD",
-    time="รูปแบบ HH:MM (24 ชั่วโมง)",
-    message="ข้อความแจ้งเตือน"
+    date="YYYY-MM-DD",
+    time="HH:MM (24h)",
+    message="ข้อความเตือน"
 )
-async def remind(
-    interaction: discord.Interaction,
-    date: str,
-    time: str,
-    message: str
-):
+async def remind(interaction: discord.Interaction, date: str, time: str, message: str):
     try:
         remind_time = datetime.strptime(
             f"{date} {time}", "%Y-%m-%d %H:%M"
@@ -79,8 +93,7 @@ async def remind(
 
     except ValueError:
         await interaction.response.send_message(
-            "❌ รูปแบบวันหรือเวลาไม่ถูกต้อง",
-            ephemeral=True
+            "❌ รูปแบบวันที่หรือเวลาไม่ถูกต้อง", ephemeral=True
         )
         return
 
@@ -97,25 +110,31 @@ async def remind(
 
     client.loop.create_task(schedule_reminder(reminder))
 
+    # ===== COUNTDOWN =====
+    now = datetime.now(timezone.utc)
+    seconds_left = int((remind_time - now).total_seconds())
+
+    if seconds_left > 0:
+        days = seconds_left // 86400
+        hours = (seconds_left % 86400) // 3600
+        minutes = (seconds_left % 3600) // 60
+
+        countdown_text = f"{days} วัน {hours} ชั่วโมง {minutes} นาที"
+    else:
+        countdown_text = "กำลังจะถึงเวลาแล้ว!"
+
     await interaction.response.send_message(
-        f"✅ ตั้งเตือนแล้ว!\n📅 {date}\n⏰ {time}\n📝 {message}",
+        f"✅ ตั้งเตือนแล้ว!\n"
+        f"📅 {date} ⏰ {time}\n"
+        f"📝 {message}\n"
+        f"⏳ เหลือเวลาอีก {countdown_text}",
         ephemeral=True
     )
 
-# ======================
-# EVENTS
-# ======================
-@client.event
-async def on_ready():
-    await tree.sync()
-    print(f"✅ Logged in as {client.user}")
+# ========================
+# RUN
+# ========================
+if not TOKEN:
+    raise RuntimeError("❌ ไม่พบ DISCORD_TOKEN ใน Environment")
 
-    # โหลด reminder ที่ค้างอยู่
-    reminders = load_reminders()
-    for r in reminders:
-        client.loop.create_task(schedule_reminder(r))
-
-# ======================
-# RUN BOT
-# ======================
 client.run(TOKEN)
