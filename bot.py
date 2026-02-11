@@ -3,141 +3,183 @@ from discord import app_commands
 import asyncio
 from datetime import datetime, timezone, timedelta
 import os
-import json
 import re
 
-# ================= CONFIG =================
 TOKEN = os.getenv("DISCORD_TOKEN")
-ADMIN_ID = 1392851942480412822
 
-COLOR_MINT = 0x3EF2C5
+ADMINZENO_COLOR = 0x3EF2C5
 LOGO_URL = "https://cdn.phototourl.com/uploads/2026-02-11-5a3eeb2d-d2bf-4821-9742-bdcf3c4d9540.gif"
-DATA_FILE = "roles.json"
 
 if not TOKEN:
-    raise RuntimeError("DISCORD_TOKEN not found")
+    raise RuntimeError("❌ DISCORD_TOKEN not found")
 
-# ================= DISCORD =================
 intents = discord.Intents.default()
 intents.members = True
 
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-# ================= STORAGE =================
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        return []
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-# ================= TIME PARSER =================
+# =========================
+# TIME PARSER
+# =========================
 def parse_duration(text):
-    pattern = re.findall(r"(\d+)([dhm])", text.lower())
-    if not pattern:
+    pattern = re.compile(r"(\d+)([dhm])")
+    matches = pattern.findall(text.lower())
+    if not matches:
         return None
 
     delta = timedelta()
-    for value, unit in pattern:
-        value = int(value)
+    for amount, unit in matches:
+        amount = int(amount)
         if unit == "d":
-            delta += timedelta(days=value)
+            delta += timedelta(days=amount)
         elif unit == "h":
-            delta += timedelta(hours=value)
+            delta += timedelta(hours=amount)
         elif unit == "m":
-            delta += timedelta(minutes=value)
-
+            delta += timedelta(minutes=amount)
     return delta
 
-# ================= FORMAT THAI DATE =================
-def thai_datetime(dt):
-    thai_months = [
-        "", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน",
-        "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม",
-        "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
-    ]
-    thai_days = [
-        "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี",
-        "ศุกร์", "เสาร์", "อาทิตย์"
-    ]
+# =========================
+# PROGRESS BAR
+# =========================
+def make_progress_bar(percent):
+    total_blocks = 10
+    filled = int(percent * total_blocks)
+    empty = total_blocks - filled
+    return "▰" * filled + "▱" * empty
 
-    dt_local = dt.astimezone(timezone(timedelta(hours=7)))
-    year_be = dt_local.year + 543
+# =========================
+# COLOR SYSTEM
+# =========================
+def get_color(percent):
+    if percent > 0.5:
+        return 0x3EF2C5  # มิ้น
+    elif percent > 0.2:
+        return 0xFFD93D  # เหลือง
+    else:
+        return 0xFF4D4D  # แดง
 
-    return f"วัน{thai_days[dt_local.weekday()]}ที่ {dt_local.day} {thai_months[dt_local.month]} {year_be} {dt_local.strftime('%H:%M')}"
+# =========================
+# REALTIME ROLE SYSTEM
+# =========================
+async def role_timer(member, role, duration, interaction):
 
-# ================= EXPIRE TASK =================
-async def expire_role(data):
-    expire_time = datetime.fromisoformat(data["expire"])
+    start_time = datetime.now(timezone.utc)
+    expire_time = start_time + duration
+
+    total_seconds = duration.total_seconds()
+
+    await member.add_roles(role)
+
+    # DM ตอนให้ Role
+    try:
+        await member.send(f"🎉 คุณได้รับ {role.name} ระยะเวลา {duration}")
+        await interaction.user.send(f"✅ คุณให้ {role.name} กับ {member.display_name}")
+    except:
+        pass
+
+    # ส่ง embed ในห้อง
+    message = await interaction.followup.send(embed=build_embed(member, role, start_time, expire_time, total_seconds))
+
+    # ===== LOOP UPDATE =====
+    while True:
+        now = datetime.now(timezone.utc)
+        remaining = (expire_time - now).total_seconds()
+
+        if remaining <= 0:
+            break
+
+        percent = remaining / total_seconds
+
+        embed = build_embed(member, role, start_time, expire_time, total_seconds)
+        embed.color = get_color(percent)
+
+        try:
+            await message.edit(embed=embed)
+        except:
+            pass
+
+        await asyncio.sleep(60)
+
+    # ===== หมดเวลา =====
+    await member.remove_roles(role)
+
+    expired_embed = discord.Embed(
+        title="📅 Check member time!",
+        description="❌ Role หมดเวลาแล้ว",
+        color=0xFF4D4D
+    )
+
+    expired_embed.set_thumbnail(url=LOGO_URL)
+    expired_embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
+    expired_embed.add_field(name="🏷 Role", value=role.mention, inline=False)
+    expired_embed.set_footer(text="🔔 ADMINZENO • Expired")
+
+    await message.edit(embed=expired_embed)
+
+    # DM ตอนหมดเวลา
+    try:
+        await member.send(f"⏳ Role {role.name} ของคุณหมดเวลาแล้ว")
+        await interaction.user.send(f"🔔 Role {role.name} ของ {member.display_name} หมดเวลาแล้ว")
+    except:
+        pass
+
+# =========================
+# EMBED BUILDER
+# =========================
+def build_embed(member, role, start_time, expire_time, total_seconds):
+
     now = datetime.now(timezone.utc)
+    remaining = (expire_time - now).total_seconds()
+    percent = max(0, remaining / total_seconds)
 
-    delay = (expire_time - now).total_seconds()
-    if delay > 0:
-        await asyncio.sleep(delay)
+    progress = make_progress_bar(percent)
+    expire_timestamp = int(expire_time.timestamp())
 
-    guild = client.get_guild(data["guild_id"])
-    if not guild:
-        return
+    thai_year = expire_time.year + 543
+    thai_date = expire_time.strftime(f"%Aที่ %d %B {thai_year} %H:%M")
 
-    member = guild.get_member(data["member_id"])
-    role = guild.get_role(data["role_id"])
+    embed = discord.Embed(
+        title="📅 Check member time!",
+        description="📌 สมาชิกได้รับยศเรียบร้อยครัช",
+        color=get_color(percent)
+    )
 
-    if member and role:
-        await member.remove_roles(role)
+    embed.set_thumbnail(url=LOGO_URL)
 
-        embed = discord.Embed(
-            title="📅 Check member time!",
-            description="📌 หมายเหตุ\nRole หมดเวลาแล้ว",
-            color=0xFF4D4D
-        )
-        embed.set_thumbnail(url=LOGO_URL)
-        embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
-        embed.add_field(name="🏷 Role", value=role.mention, inline=False)
-        embed.set_footer(text="🔔 ADMINZENO • Welcome To community")
+    embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
+    embed.add_field(name="🏷 Role", value=role.mention, inline=False)
 
-        # DM ผู้รับ
-        try:
-            await member.send(embed=embed)
-        except:
-            pass
+    embed.add_field(
+        name="📝 จำนวนวันสมาชิก",
+        value=f"⏳ เหลือเวลา: <t:{expire_timestamp}:R>",
+        inline=False
+    )
 
-        # DM คุณ
-        admin = await client.fetch_user(ADMIN_ID)
-        try:
-            await admin.send(embed=embed)
-        except:
-            pass
+    embed.add_field(
+        name="📆 วันหมดอายุ",
+        value=f"{thai_date}\n<t:{expire_timestamp}:F>",
+        inline=False
+    )
 
-        # แจ้งในห้องเดิม
-        channel = guild.get_channel(data["channel_id"])
-        if channel:
-            await channel.send(embed=embed)
+    embed.add_field(
+        name="📊 Progress",
+        value=f"{progress} {int(percent*100)}%",
+        inline=False
+    )
 
-    # ลบจากฐานข้อมูล
-    records = load_data()
-    records = [r for r in records if r["id"] != data["id"]]
-    save_data(records)
+    embed.set_footer(text="🔔 ADMINZENO • Welcome To community")
 
-# ================= READY =================
-@client.event
-async def on_ready():
-    await tree.sync()
-    print(f"Logged in as {client.user}")
+    return embed
 
-    records = load_data()
-    for r in records:
-        client.loop.create_task(expire_role(r))
-
-# ================= SLASH COMMAND =================
-@tree.command(name="setrole", description="ตั้ง Role ชั่วคราว (Admin เท่านั้น)")
+# =========================
+# SLASH COMMAND
+# =========================
+@tree.command(name="setrole", description="ADMINZENO Premium Role System")
 @app_commands.describe(
     member="เลือกสมาชิก",
     role="เลือก Role",
-    duration="เช่น 30m / 1h / 7d / 2h30m"
+    duration="เช่น 30m / 1h / 7d"
 )
 async def setrole(interaction: discord.Interaction, member: discord.Member, role: discord.Role, duration: str):
 
@@ -150,59 +192,16 @@ async def setrole(interaction: discord.Interaction, member: discord.Member, role
         await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง", ephemeral=True)
         return
 
-    expire_time = datetime.now(timezone.utc) + delta
-    expire_timestamp = int(expire_time.timestamp())
+    await interaction.response.defer()
 
-    await member.add_roles(role)
+    client.loop.create_task(role_timer(member, role, delta, interaction))
 
-    embed = discord.Embed(
-        title="📅 Check member time!",
-        description="📌 หมายเหตุ\nRole ได้รับยศเรียบร้อยครัช",
-        color=COLOR_MINT
-    )
+# =========================
+# READY
+# =========================
+@client.event
+async def on_ready():
+    await tree.sync()
+    print(f"🔥 ADMINZENO ONLINE: {client.user}")
 
-    embed.set_thumbnail(url=LOGO_URL)
-    embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
-    embed.add_field(name="🏷 Role", value=role.mention, inline=False)
-    embed.add_field(name="📝 จำนวนวันสมาชิก", value=f"ระยะเวลา: {duration}", inline=False)
-    embed.add_field(
-        name="⏳ วันหมดอายุ",
-        value=f"{thai_datetime(expire_time)}\nระยะเวลาคงเหลือ: <t:{expire_timestamp}:R>",
-        inline=False
-    )
-    embed.set_footer(text="🔔 ADMINZENO • Welcome To community")
-
-    # แจ้งในห้องที่ใช้คำสั่ง
-    await interaction.response.send_message(embed=embed)
-
-    # DM ผู้รับ
-    try:
-        await member.send(embed=embed)
-    except:
-        pass
-
-    # DM คุณ
-    admin = await client.fetch_user(ADMIN_ID)
-    try:
-        await admin.send(embed=embed)
-    except:
-        pass
-
-    # บันทึกข้อมูล
-    record = {
-        "id": datetime.now().timestamp(),
-        "guild_id": interaction.guild.id,
-        "channel_id": interaction.channel.id,
-        "member_id": member.id,
-        "role_id": role.id,
-        "expire": expire_time.isoformat()
-    }
-
-    data = load_data()
-    data.append(record)
-    save_data(data)
-
-    client.loop.create_task(expire_role(record))
-
-# ================= RUN =================
 client.run(TOKEN)
