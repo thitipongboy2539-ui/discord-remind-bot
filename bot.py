@@ -4,23 +4,28 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import json
 import os
+import re
 
 # ========================
 # CONFIG
 # ========================
 DATA_FILE = "reminders.json"
 TOKEN = os.getenv("DISCORD_TOKEN")
-THAI_TZ = timezone(timedelta(hours=7))
+
+if not TOKEN:
+    raise RuntimeError("❌ ไม่พบ DISCORD_TOKEN")
 
 # ========================
 # DISCORD SETUP
 # ========================
 intents = discord.Intents.default()
+intents.members = True
+
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 # ========================
-# FILE STORAGE
+# STORAGE
 # ========================
 def load_reminders():
     if not os.path.exists(DATA_FILE):
@@ -33,47 +38,67 @@ def save_reminders(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 # ========================
-# REMINDER SCHEDULER
+# TIME PARSER (1h 30m 7d)
+# ========================
+def parse_duration(duration_str):
+    pattern = re.compile(r"(\d+)([dhm])")
+    matches = pattern.findall(duration_str.lower())
+
+    if not matches:
+        return None
+
+    delta = timedelta()
+
+    for amount, unit in matches:
+        amount = int(amount)
+        if unit == "d":
+            delta += timedelta(days=amount)
+        elif unit == "h":
+            delta += timedelta(hours=amount)
+        elif unit == "m":
+            delta += timedelta(minutes=amount)
+
+    return delta
+
+# ========================
+# REMINDER TASK
 # ========================
 async def schedule_reminder(reminder):
     remind_time = datetime.fromisoformat(reminder["time"])
-
-    if remind_time.tzinfo is None:
-        remind_time = remind_time.replace(tzinfo=timezone.utc)
-    else:
-        remind_time = remind_time.astimezone(timezone.utc)
-
     now = datetime.now(timezone.utc)
+
     delay = (remind_time - now).total_seconds()
 
     if delay > 0:
         await asyncio.sleep(delay)
 
-    message_text = (
-        f"⏰ **แจ้งเตือน: {reminder['name']}**\n"
-        f"📅 {remind_time.astimezone(THAI_TZ).strftime('%Y-%m-%d %H:%M')}\n"
-        f"📝 {reminder['message']}"
+    guild = client.get_guild(reminder["guild_id"])
+    member = guild.get_member(reminder["target_user_id"])
+    role = guild.get_role(reminder["role_id"])
+
+    if member and role:
+        try:
+            await member.remove_roles(role)
+        except Exception as e:
+            print("Remove role error:", e)
+
+    embed = discord.Embed(
+        title="⏰ หมดเวลาแล้ว",
+        description=f"Role {role.mention} ถูกลบเรียบร้อย",
+        color=discord.Color.red()
     )
 
     try:
-        owner = await client.fetch_user(reminder["user_id"])
-        await owner.send(message_text)
+        await member.send(embed=embed)
     except:
         pass
-
-    if reminder.get("notify_user_id"):
-        try:
-            notify_user = await client.fetch_user(reminder["notify_user_id"])
-            await notify_user.send(message_text)
-        except:
-            pass
 
     reminders = load_reminders()
     reminders = [r for r in reminders if r["id"] != reminder["id"]]
     save_reminders(reminders)
 
 # ========================
-# ON READY
+# READY
 # ========================
 @client.event
 async def on_ready():
@@ -87,40 +112,54 @@ async def on_ready():
 # ========================
 # SLASH COMMAND
 # ========================
-@tree.command(name="remind", description="ตั้งแจ้งเตือน")
+@tree.command(name="temprole", description="ให้ Role ชั่วคราว (Admin เท่านั้น)")
 @app_commands.describe(
-    date="YYYY-MM-DD",
-    time="HH:MM (24h)",
-    name="ชื่อกิจกรรม",
-    message="รายละเอียด",
-    notify_user="เลือกคนที่ต้องการให้แจ้งเตือนเพิ่ม (ไม่บังคับ)"
+    duration="เช่น 30m / 1h / 7d / 2h30m",
+    target_user="เลือกสมาชิก",
+    role="เลือก Role"
 )
-async def remind(
+async def temprole(
     interaction: discord.Interaction,
-    date: str,
-    time: str,
-    name: str,
-    message: str,
-    notify_user: discord.User = None
+    duration: str,
+    target_user: discord.Member,
+    role: discord.Role
 ):
-    try:
-        remind_time = datetime.strptime(
-            f"{date} {time}", "%Y-%m-%d %H:%M"
-        ).replace(tzinfo=THAI_TZ).astimezone(timezone.utc)
 
-    except ValueError:
+    # ✅ จำกัดเฉพาะ Admin
+    if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message(
-            "❌ รูปแบบวันที่หรือเวลาไม่ถูกต้อง"
+            "❌ คำสั่งนี้สำหรับ Admin เท่านั้น",
+            ephemeral=True
+        )
+        return
+
+    delta = parse_duration(duration)
+
+    if not delta:
+        await interaction.response.send_message(
+            "❌ รูปแบบเวลาไม่ถูกต้อง (ตัวอย่าง: 30m, 1h, 7d, 2h30m)",
+            ephemeral=True
+        )
+        return
+
+    now = datetime.now(timezone.utc)
+    remind_time = now + delta
+
+    try:
+        await target_user.add_roles(role)
+    except:
+        await interaction.response.send_message(
+            "❌ เพิ่ม Role ไม่สำเร็จ (เช็ค Permission)",
+            ephemeral=True
         )
         return
 
     reminder = {
         "id": datetime.now().timestamp(),
-        "user_id": interaction.user.id,
-        "time": remind_time.isoformat(),
-        "name": name,
-        "message": message,
-        "notify_user_id": notify_user.id if notify_user else None
+        "guild_id": interaction.guild.id,
+        "target_user_id": target_user.id,
+        "role_id": role.id,
+        "time": remind_time.isoformat()
     }
 
     reminders = load_reminders()
@@ -129,42 +168,17 @@ async def remind(
 
     client.loop.create_task(schedule_reminder(reminder))
 
-    # ===== COUNTDOWN =====
-    now = datetime.now(timezone.utc)
-    seconds_left = int((remind_time - now).total_seconds())
-
-    if seconds_left > 0:
-        days = seconds_left // 86400
-        hours = (seconds_left % 86400) // 3600
-        minutes = (seconds_left % 3600) // 60
-        countdown_text = f"{days} วัน {hours} ชั่วโมง {minutes} นาที"
-    else:
-        countdown_text = "กำลังจะถึงเวลาแล้ว!"
-
-    # ===== EMBED =====
     embed = discord.Embed(
-        title="📅 Check member time!",
-        color=discord.Color.blue()
+        title="🎉 ให้ Role ชั่วคราวสำเร็จ",
+        color=discord.Color.green()
     )
-
-    embed.add_field(name="📌 หมายเหตุ", value=name, inline=False)
-    embed.add_field(name="📝 รายละเอียด", value=message, inline=False)
-    embed.add_field(name="⏰ วันเวลาอายุสมาชิก", value=f"{date} {time}", inline=False)
-    embed.add_field(name="⏳ เวลาคงเหลือ", value=countdown_text, inline=False)
-    embed.add_field(name="👤 สร้างโดย", value=interaction.user.mention, inline=False)
-
-    if notify_user:
-        embed.add_field(name="🔔 ADMINZENO", value=notify_user.mention, inline=False)
-
-    embed.set_footer(text="Reminder System")
-    embed.timestamp = datetime.now()
+    embed.add_field(name="👤 สมาชิก", value=target_user.mention)
+    embed.add_field(name="🏷 Role", value=role.mention)
+    embed.add_field(name="⏳ ระยะเวลา", value=duration)
 
     await interaction.response.send_message(embed=embed)
 
 # ========================
 # RUN
 # ========================
-if not TOKEN:
-    raise RuntimeError("❌ ไม่พบ DISCORD_TOKEN ใน Environment")
-
 client.run(TOKEN)
