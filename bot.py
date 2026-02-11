@@ -1,174 +1,205 @@
 import discord
-from discord import app_commands
 from discord.ext import commands, tasks
-import sqlite3
-import datetime
+from discord import app_commands
 import os
+import json
+import datetime
 
-# ==============================
+# =========================
 # CONFIG
-# ==============================
+# =========================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 GUILD_ID = 1465621460805615820
+
 VIP_ROLE_ID = 1465623773934780516
 GOLD_ROLE_ID = 1465623162317180969
 
-LOGO_URL = "https://cdn.phototourl.com/uploads/2026-02-11-5a3eeb2d-d2bf-4821-9742-bdcf3c4d9540.gif"
-MAIN_COLOR = 0x3EF2C5  # มิ้น
+ADMIN_ID = 1392851942480412822
 
-# ==============================
-# INTENTS
-# ==============================
+DATA_FILE = "premium.json"
+
+PROMPTPAY_NUMBER = "0643270431"
+BANK_INFO = "กสิกร : ฐิติพงษ์ สมบูรณ์"
+
+# =========================
+# BOT SETUP
+# =========================
 
 intents = discord.Intents.default()
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ==============================
+# =========================
 # DATABASE
-# ==============================
+# =========================
 
-conn = sqlite3.connect("database.db")
-cursor = conn.cursor()
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        return []
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS subscriptions (
-    user_id INTEGER,
-    package TEXT,
-    expire_at TEXT,
-    role_id INTEGER
-)
-""")
-conn.commit()
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
-# ==============================
-# FORMAT DATE (พ.ศ.)
-# ==============================
+# =========================
+# UTIL
+# =========================
 
-def format_thai_datetime(dt):
-    months = [
-        "มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
-        "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"
-    ]
-    days = ["จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์","อาทิตย์"]
+def now():
+    return datetime.datetime.now(datetime.timezone.utc)
 
-    return f"วัน{days[dt.weekday()]}ที่ {dt.day} {months[dt.month-1]} {dt.year+543} {dt.strftime('%H:%M')}"
+def add_30_days():
+    return now() + datetime.timedelta(days=30)
 
-# ==============================
-# EMBED BUILDER
-# ==============================
+def format_expire(dt):
+    thai_year = dt.year + 543
+    return dt.strftime(f"%d/%m/{thai_year} %H:%M")
 
-def build_embed(member, package, expire_time):
-    remaining = expire_time - datetime.datetime.utcnow()
-    days = remaining.days
-    hours, remainder = divmod(remaining.seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
+# =========================
+# BUY COMMAND
+# =========================
 
-    digital_time = f"{days:02d}:{hours:02d}:{minutes:02d}:{seconds:02d}"
+@bot.tree.command(name="buy", description="ซื้อแพ็กเกจ VIP / Gold")
+async def buy(interaction: discord.Interaction):
 
     embed = discord.Embed(
-        title="👑 Premium Membership Activated",
-        description=f"📦 แพ็กเกจ: **{package}**",
-        color=MAIN_COLOR
+        title="💎 Premium Package",
+        description="เลือกแพ็กเกจแล้วโอนเงิน จากนั้นส่งสลิปใน DM พร้อมพิมพ์ /submit",
+        color=0x3EF2C5
     )
 
-    embed.add_field(name="👤 สมาชิก", value=member.mention, inline=False)
-    embed.add_field(name="⏳ วันหมดอายุ", value=format_thai_datetime(expire_time), inline=False)
-    embed.add_field(name="🕒 เวลาคงเหลือ (Digital)", value=f"```{digital_time}```", inline=False)
-
-    embed.set_image(url=LOGO_URL)
-    embed.set_footer(text="🔔 ADMINZENO • Premium System")
-
-    return embed
-
-# ==============================
-# CHECK EXPIRE LOOP
-# ==============================
-
-@tasks.loop(minutes=1)
-async def check_expired():
-    now = datetime.datetime.utcnow()
-
-    cursor.execute("SELECT user_id, package, expire_at, role_id FROM subscriptions")
-    rows = cursor.fetchall()
-
-    for user_id, package, expire_at, role_id in rows:
-        expire_time = datetime.datetime.fromisoformat(expire_at)
-
-        if now >= expire_time:
-            guild = bot.get_guild(GUILD_ID)
-            member = guild.get_member(user_id)
-            role = guild.get_role(role_id)
-
-            if member and role:
-                await member.remove_roles(role)
-
-                try:
-                    await member.send(f"⛔ แพ็กเกจ {package} ของคุณหมดอายุแล้ว")
-                except:
-                    pass
-
-            cursor.execute("DELETE FROM subscriptions WHERE user_id=?", (user_id,))
-            conn.commit()
-
-# ==============================
-# SLASH COMMAND
-# ==============================
-
-@bot.tree.command(name="subscribe", description="สมัคร Premium 30 วัน")
-@app_commands.describe(
-    member="เลือกสมาชิก",
-    package="เลือกแพ็กเกจ"
-)
-@app_commands.choices(package=[
-    app_commands.Choice(name="VIP Member", value="VIP"),
-    app_commands.Choice(name="Gold Member", value="GOLD")
-])
-async def subscribe(interaction: discord.Interaction,
-                    member: discord.Member,
-                    package: app_commands.Choice[str]):
-
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Admin เท่านั้น", ephemeral=True)
-        return
-
-    expire_time = datetime.datetime.utcnow() + datetime.timedelta(days=30)
-
-    if package.value == "VIP":
-        role_id = VIP_ROLE_ID
-    else:
-        role_id = GOLD_ROLE_ID
-
-    role = interaction.guild.get_role(role_id)
-    await member.add_roles(role)
-
-    cursor.execute("DELETE FROM subscriptions WHERE user_id=?", (member.id,))
-    cursor.execute(
-        "INSERT INTO subscriptions VALUES (?, ?, ?, ?)",
-        (member.id, package.value, expire_time.isoformat(), role_id)
-    )
-    conn.commit()
-
-    embed = build_embed(member, package.value, expire_time)
+    embed.add_field(name="👑 VIP Member", value="200 บาท / 30 วัน", inline=False)
+    embed.add_field(name="🥇 Gold Member", value="100 บาท / 30 วัน", inline=False)
+    embed.add_field(name="💳 PromptPay", value=PROMPTPAY_NUMBER, inline=False)
+    embed.add_field(name="🏦 ธนาคาร", value=BANK_INFO, inline=False)
 
     await interaction.response.send_message(embed=embed)
 
-    try:
-        await member.send(f"🎉 คุณได้รับแพ็กเกจ {package.value} 30 วัน")
-    except:
-        pass
+# =========================
+# SUBMIT SLIP
+# =========================
 
-# ==============================
+@bot.tree.command(name="submit", description="ส่งสลิปชำระเงิน")
+@app_commands.describe(package="VIP หรือ Gold")
+async def submit(interaction: discord.Interaction, package: str):
+
+    if interaction.guild:
+        await interaction.response.send_message("❌ กรุณาใช้คำสั่งนี้ใน DM", ephemeral=True)
+        return
+
+    if package.lower() not in ["vip", "gold"]:
+        await interaction.response.send_message("❌ ระบุ VIP หรือ Gold", ephemeral=True)
+        return
+
+    admin = await bot.fetch_user(ADMIN_ID)
+
+    embed = discord.Embed(
+        title="📩 มีการส่งสลิปใหม่",
+        description=f"ผู้ใช้: {interaction.user.mention}\nแพ็กเกจ: {package.upper()}",
+        color=0xFFD93D
+    )
+
+    await admin.send(embed=embed)
+
+    await interaction.response.send_message("✅ ส่งคำขอแล้ว รอ Admin ตรวจสอบ")
+
+# =========================
+# APPROVE
+# =========================
+
+@bot.tree.command(name="approve", description="อนุมัติแพ็กเกจ (Admin)")
+@app_commands.describe(member="เลือกสมาชิก", package="VIP หรือ Gold")
+async def approve(interaction: discord.Interaction, member: discord.Member, package: str):
+
+    if interaction.user.id != ADMIN_ID:
+        await interaction.response.send_message("❌ Admin เท่านั้น", ephemeral=True)
+        return
+
+    package = package.lower()
+
+    if package == "vip":
+        role_id = VIP_ROLE_ID
+    elif package == "gold":
+        role_id = GOLD_ROLE_ID
+    else:
+        await interaction.response.send_message("❌ ระบุ VIP หรือ Gold", ephemeral=True)
+        return
+
+    role = interaction.guild.get_role(role_id)
+
+    expire_date = add_30_days()
+
+    await member.add_roles(role)
+
+    data = load_data()
+    data.append({
+        "user_id": member.id,
+        "role_id": role_id,
+        "expire": expire_date.isoformat()
+    })
+    save_data(data)
+
+    embed = discord.Embed(
+        title="✅ อนุมัติสำเร็จ",
+        description=f"{member.mention} ได้รับ {role.mention}\nหมดอายุ: {format_expire(expire_date)}",
+        color=0x3EF2C5
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+    await member.send(f"🎉 คุณได้รับ {role.name} หมดอายุ {format_expire(expire_date)}")
+
+# =========================
+# AUTO CHECK EXPIRY
+# =========================
+
+@tasks.loop(minutes=1)
+async def check_expire():
+
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        return
+
+    data = load_data()
+    new_data = []
+
+    for entry in data:
+        expire_time = datetime.datetime.fromisoformat(entry["expire"])
+
+        if now() >= expire_time:
+
+            member = guild.get_member(entry["user_id"])
+            role = guild.get_role(entry["role_id"])
+
+            if member and role:
+                await member.remove_roles(role)
+                try:
+                    await member.send(f"⛔ {role.name} ของคุณหมดอายุแล้ว")
+                except:
+                    pass
+
+        else:
+            new_data.append(entry)
+
+    save_data(new_data)
+
+# =========================
 # READY
-# ==============================
+# =========================
 
 @bot.event
 async def on_ready():
-    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-    check_expired.start()
-    print(f"✅ Premium System Online: {bot.user}")
+    await bot.tree.sync()
+    check_expire.start()
+    print(f"✅ ระบบพรีเมียมออนไลน์: {bot.user}")
+
+# =========================
+# RUN
+# =========================
 
 bot.run(TOKEN)
