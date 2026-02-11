@@ -11,6 +11,9 @@ ADMIN_PASS = os.environ.get("ADMIN_PASS")
 
 DATA_FILE = "premium_data.json"
 
+VIP_PRICE = 200
+GOLD_PRICE = 100
+
 # -------------------------
 # Load Data
 # -------------------------
@@ -21,7 +24,7 @@ def load_data():
         return json.load(f)
 
 # -------------------------
-# Login Page
+# Login
 # -------------------------
 @app.route("/", methods=["GET", "POST"])
 def login():
@@ -40,14 +43,14 @@ def login():
     <head>
         <script src="https://cdn.tailwindcss.com"></script>
     </head>
-    <body class="bg-gray-900 flex items-center justify-center h-screen text-white">
-        <div class="bg-gray-800 p-8 rounded-2xl shadow-xl w-96">
+    <body class="bg-gray-950 flex items-center justify-center h-screen text-white">
+        <div class="bg-gray-900 p-8 rounded-2xl shadow-2xl w-96">
             <h2 class="text-2xl font-bold mb-6 text-center">🔐 Admin Login</h2>
             <form method="post" class="space-y-4">
                 <input name="username" placeholder="Username"
-                    class="w-full p-3 rounded bg-gray-700 focus:outline-none">
+                    class="w-full p-3 rounded bg-gray-800 focus:outline-none">
                 <input name="password" type="password" placeholder="Password"
-                    class="w-full p-3 rounded bg-gray-700 focus:outline-none">
+                    class="w-full p-3 rounded bg-gray-800 focus:outline-none">
                 <button class="w-full bg-emerald-500 hover:bg-emerald-600 p-3 rounded font-bold">
                     Login
                 </button>
@@ -58,7 +61,7 @@ def login():
     """
 
 # -------------------------
-# Dashboard
+# Dashboard v2
 # -------------------------
 @app.route("/dashboard")
 def dashboard():
@@ -67,78 +70,102 @@ def dashboard():
 
     data = load_data()
     now = datetime.datetime.now(datetime.UTC)
+    search = request.args.get("search", "")
 
-    total = len(data)
     vip_count = 0
     gold_count = 0
+    total_revenue = 0
 
     rows = ""
 
     for user_id, info in data.items():
+
+        if search and search not in user_id:
+            continue
+
         expiry = datetime.datetime.fromisoformat(info["expiry"])
         remaining = expiry - now
 
         if info["package"] == "vip":
             vip_count += 1
+            total_revenue += VIP_PRICE
         else:
             gold_count += 1
+            total_revenue += GOLD_PRICE
 
         if remaining.total_seconds() <= 0:
-            status = "Expired"
-            color = "text-red-400"
+            badge = '<span class="bg-red-500 px-2 py-1 rounded text-xs">Expired</span>'
         elif remaining <= datetime.timedelta(days=3):
-            status = "Expiring Soon"
-            color = "text-yellow-400"
+            badge = '<span class="bg-yellow-500 px-2 py-1 rounded text-xs">Expiring</span>'
         else:
-            status = "Active"
-            color = "text-emerald-400"
+            badge = '<span class="bg-emerald-500 px-2 py-1 rounded text-xs">Active</span>'
 
         rows += f"""
-        <tr class="border-b border-gray-700 hover:bg-gray-800">
+        <tr class="border-b border-gray-800 hover:bg-gray-900">
             <td class="p-3">{user_id}</td>
             <td class="p-3 uppercase">{info['package']}</td>
             <td class="p-3">{expiry.strftime('%d/%m/%Y %H:%M')}</td>
-            <td class="p-3 font-bold {color}">{status}</td>
+            <td class="p-3">{badge}</td>
             <td class="p-3">
                 <a href="/remove/{user_id}" 
-                   class="bg-red-500 hover:bg-red-600 px-3 py-1 rounded text-sm">
+                   class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm">
                    Remove
                 </a>
             </td>
         </tr>
         """
 
+    total_members = vip_count + gold_count
+
     return f"""
     <html>
     <head>
         <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
-    <body class="bg-gray-900 text-white min-h-screen p-8">
+    <body class="bg-gray-950 text-white min-h-screen p-8">
 
-        <div class="max-w-6xl mx-auto">
+        <div class="max-w-7xl mx-auto">
 
-            <h1 class="text-3xl font-bold mb-8">👑 Premium Enterprise Dashboard</h1>
+            <h1 class="text-3xl font-bold mb-8">👑 Premium Enterprise v2</h1>
 
-            <!-- Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-                <div class="bg-gray-800 p-6 rounded-2xl shadow">
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
+                <div class="bg-gray-900 p-6 rounded-2xl shadow">
                     <h2 class="text-gray-400">Total Members</h2>
-                    <p class="text-3xl font-bold mt-2">{total}</p>
+                    <p class="text-3xl font-bold mt-2">{total_members}</p>
                 </div>
-                <div class="bg-gray-800 p-6 rounded-2xl shadow">
-                    <h2 class="text-gray-400">VIP Members</h2>
+                <div class="bg-gray-900 p-6 rounded-2xl shadow">
+                    <h2 class="text-gray-400">VIP</h2>
                     <p class="text-3xl font-bold text-emerald-400 mt-2">{vip_count}</p>
                 </div>
-                <div class="bg-gray-800 p-6 rounded-2xl shadow">
-                    <h2 class="text-gray-400">Gold Members</h2>
+                <div class="bg-gray-900 p-6 rounded-2xl shadow">
+                    <h2 class="text-gray-400">Gold</h2>
                     <p class="text-3xl font-bold text-yellow-400 mt-2">{gold_count}</p>
+                </div>
+                <div class="bg-gray-900 p-6 rounded-2xl shadow">
+                    <h2 class="text-gray-400">Revenue</h2>
+                    <p class="text-3xl font-bold text-purple-400 mt-2">฿{total_revenue}</p>
                 </div>
             </div>
 
+            <!-- Chart -->
+            <div class="bg-gray-900 p-6 rounded-2xl shadow mb-10">
+                <canvas id="myChart"></canvas>
+            </div>
+
+            <!-- Search -->
+            <form method="get" class="mb-6">
+                <input name="search" placeholder="Search User ID..."
+                    class="p-3 rounded bg-gray-800 w-80">
+                <button class="bg-blue-600 px-4 py-3 rounded">Search</button>
+                <a href="/dashboard" class="ml-3 text-gray-400">Reset</a>
+            </form>
+
             <!-- Table -->
-            <div class="bg-gray-800 rounded-2xl shadow overflow-hidden">
+            <div class="bg-gray-900 rounded-2xl shadow overflow-hidden">
                 <table class="w-full text-left">
-                    <thead class="bg-gray-700 text-gray-300">
+                    <thead class="bg-gray-800 text-gray-300">
                         <tr>
                             <th class="p-3">User ID</th>
                             <th class="p-3">Package</th>
@@ -154,20 +181,33 @@ def dashboard():
             </div>
 
             <div class="mt-8">
-                <a href="/logout" 
-                   class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded">
-                   Logout
+                <a href="/logout" class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded">
+                    Logout
                 </a>
             </div>
 
         </div>
+
+        <script>
+        const ctx = document.getElementById('myChart');
+        new Chart(ctx, {{
+            type: 'doughnut',
+            data: {{
+                labels: ['VIP', 'Gold'],
+                datasets: [{{
+                    data: [{vip_count}, {gold_count}],
+                    backgroundColor: ['#10B981', '#FACC15']
+                }}]
+            }}
+        }});
+        </script>
 
     </body>
     </html>
     """
 
 # -------------------------
-# Remove Premium
+# Remove
 # -------------------------
 @app.route("/remove/<user_id>")
 def remove(user_id):
